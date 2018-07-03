@@ -1,7 +1,7 @@
 # mask-rcnn
 
 
-This is a Pytorch 0.4 implementation of [Mask R-CNN](https://arxiv.org/abs/1703.06870) that is in large parts based on Matterport's [Mask_RCNN](https://github.com/matterport/Mask_RCNN)\[1\] and (https://github.com/multimodallearning/pytorch-mask-rcnn)\[1\]. Matterport's repository is an implementation on Keras and TensorFlow.
+This is a Pytorch 0.4 implementation of [Mask R-CNN](https://arxiv.org/abs/1703.06870) that is in large parts based on Matterport's [Mask_RCNN](https://github.com/matterport/Mask_RCNN)\[1\] and [this](https://github.com/multimodallearning/pytorch-mask-rcnn)\[2\]. Matterport's repository is an implementation on Keras and TensorFlow.
 
 The main improvements from \[2\] are:
 - Pytorch 0.4
