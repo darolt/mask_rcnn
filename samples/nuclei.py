@@ -11,10 +11,10 @@ Written by Waleed Abdulla
 Usage: import the module (see Jupyter notebooks for examples), or run from
        the command line as such:
 
-    # Train a new model starting from pre-trained COCO weights
+    # Train a new model starting from pre-trained COCO weights, example:
     python samples/nuclei.py train --dataset=/home/jro/wk/kaggle/input/ --model=coco
 
-    # Detect nuclei from dataset
+    # Detect nuclei from dataset, example:
     python samples/nuclei.py detect --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
 """
 
@@ -373,8 +373,8 @@ def detect(model, dataset_dir, subset):
             dataset.class_names, r['scores'],
             show_bbox=False, show_mask=False,
             title="Predictions")
-        #plt.imsave(fname="{}/{}.png".format(submit_dir, dataset.image_info[image_id]["id"]), arr=img)
-        img.savefig("{}/{}.png".format(submit_dir, dataset.image_info[image_id]["id"]))
+        img.savefig("{}/{}.png".format(submit_dir,
+                                       dataset.image_info[image_id]["id"]))
 
     # Save to csv file
     submission = "ImageId,EncodedPixels\n" + "\n".join(submission)
