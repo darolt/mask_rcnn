@@ -19,7 +19,6 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 """
 
 import matplotlib
-matplotlib.use('Agg')
 # import matplotlib.pyplot as plt
 
 import os
@@ -33,7 +32,9 @@ from mrcnn import visualize
 import mrcnn.config
 from mrcnn import utils
 from mrcnn import model as modellib
+from mrcnn import dataset
 
+matplotlib.use('Agg')
 
 # Root directory of the project
 ROOT_DIR = os.getcwd()

@@ -15,10 +15,13 @@ import skimage.color
 import skimage.io
 import torch
 import urllib.request
+import torch.nn as nn
 import shutil
 import warnings
-import torchvision
 import torch.nn.functional as F
+import math
+import mrcnn.config
+
 
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
@@ -115,6 +118,61 @@ def box_refinement(box, gt_box):
     result = torch.stack([dy, dx, dh, dw], dim=1)
     return result
 
+
+def subtract_mean(images, config):
+    """Takes RGB images with 0-255 values and subtraces
+    the mean pixel and converts it to float. Expects image
+    colors in RGB order.
+    """
+    return images.astype(np.float32) - config.MEAN_PIXEL
+
+
+def mold_image(image, config):
+    """Takes RGB images with 0-255 values and subtraces
+    the mean pixel and converts it to float. Expects image
+    colors in RGB order.
+    """
+    molded_image, window, scale, padding, crop = resize_image(
+        image,
+        min_dim=config.IMAGE_MIN_DIM,
+        max_dim=config.IMAGE_MAX_DIM,
+        min_scale=config.IMAGE_MIN_SCALE,
+        mode=config.IMAGE_RESIZE_MODE)
+    molded_image = subtract_mean(molded_image, config)
+
+    return molded_image, window, scale, padding, crop
+
+
+def compose_image_meta(image_id, image_shape, window, active_class_ids):
+    """Takes attributes of an image and puts them in one 1D array. Use
+    parse_image_meta() to parse the values back.
+
+    image_id: An int ID of the image. Useful for debugging.
+    image_shape: [height, width, channels]
+    window: (y1, x1, y2, x2) in pixels. The area of the image where the real
+            image is (excluding the padding)
+    active_class_ids: List of class_ids available in the dataset from which
+        the image came. Useful if training on images from multiple datasets
+        where not all classes are present in all datasets.
+    """
+    meta = np.array(
+        [image_id]                # size=1
+        + list(image_shape)       # size=3
+        + list(window)            # size=4 (y1, x1, y2, x2) in image coordinates
+        + list(active_class_ids)  # size=num_classes
+    )
+    return meta
+
+
+def parse_image_meta(meta):
+    """Parses an image info Numpy array to its components.
+    See compose_image_meta() for more details.
+    """
+    image_id = meta[:, 0]
+    image_shape = meta[:, 1:4]
+    window = meta[:, 4:8]   # (y1, x1, y2, x2) window of image in in pixels
+    active_class_ids = meta[:, 8:]
+    return image_id, image_shape, window, active_class_ids
 
 ############################################################
 #  Dataset
@@ -618,3 +676,54 @@ def log(text, array=None):
             array.min() if array.size else "",
             array.max() if array.size else ""))
     print(text)
+
+
+############################################################
+#  Pytorch Utility Functions
+############################################################
+
+
+def unique1d(tensor):
+    if tensor.size()[0] == 0 or tensor.size()[0] == 1:
+        return tensor
+    tensor = tensor.sort()[0]
+    unique_bool = tensor[1:] != tensor[:-1]
+    first_element = torch.ByteTensor([True])
+    first_element = first_element.to(mrcnn.config.DEVICE)
+    unique_bool = torch.cat((first_element, unique_bool), dim=0)
+    return tensor[unique_bool.detach()]
+
+
+def intersect1d(tensor1, tensor2):
+    aux = torch.cat((tensor1, tensor2), dim=0)
+    aux = aux.sort()[0]
+    return aux[:-1][(aux[1:] == aux[:-1]).detach()]
+
+
+class SamePad2d(nn.Module):
+    """Mimics tensorflow's 'SAME' padding.
+    """
+
+    def __init__(self, kernel_size, stride):
+        super(SamePad2d, self).__init__()
+        self.kernel_size = torch.nn.modules.utils._pair(kernel_size)
+        self.stride = torch.nn.modules.utils._pair(stride)
+
+    def forward(self, input):
+        in_width = input.size()[2]
+        in_height = input.size()[3]
+        out_width = math.ceil(float(in_width) / float(self.stride[-1]))
+        out_height = math.ceil(float(in_height) / float(self.stride[1]))
+        pad_along_width = ((out_width - 1) * self.stride[0] +
+                           self.kernel_size[0] - in_width)
+        pad_along_height = ((out_height - 1) * self.stride[1] +
+                            self.kernel_size[1] - in_height)
+        pad_left = math.floor(pad_along_width / 2)
+        pad_top = math.floor(pad_along_height / 2)
+        pad_right = pad_along_width - pad_left
+        pad_bottom = pad_along_height - pad_top
+        return F.pad(input, (pad_left, pad_right, pad_top, pad_bottom),
+                     'constant', 0)
+
+    def __repr__(self):
+        return self.__class__.__name__
