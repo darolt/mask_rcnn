@@ -1,6 +1,11 @@
 import torch
+import numpy as np
 import torch.nn.functional as F
+
 import mrcnn.config
+
+from mrcnn import utils
+from mrcnn.detection import detection_layer2
 
 
 class Losses():
@@ -183,12 +188,20 @@ def compute_mrcnn_mask_loss(target_masks, target_class_ids, pred_masks):
     return loss
 
 
-def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, mrcnn_masks,
-                     mrcnn_boxes, mrcnn_class_logits, image_metas,
-                     rois, config, mrcnn_probs):
+#def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, mrcnn_masks,
+#                     mrcnn_boxes, mrcnn_class_logits, image_metas,
+#                     rois, config, mrcnn_probs):
+
+def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
+                     predictions, config):
     """Compute loss for single image according to:
        https://www.kaggle.com/c/data-science-bowl-2018#evaluation
     """
+    mrcnn_masks = predictions[7][0]
+    mrcnn_boxes = predictions[5][0]
+    mrcnn_class_logits = predictions[3][0]
+    mrcnn_probs = predictions[9][0]
+    rois = predictions[8][0]
     print(f"mrcnn_masks {mrcnn_masks.shape}")  # X, 28, 28
     # print("mrcnn_boxes {}".format(mrcnn_boxes.size()))  # X, 2, 4
     # print("mrcnn_class_logits {}".format(mrcnn_class_logits.size()))  # X, 2
@@ -215,14 +228,12 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, mrcnn_masks,
     # print(f"{zero_ix.shape}")
     N = zero_ix[0] if zero_ix.shape[0] > 0 else gt_class_ids.shape[0]
 
-    # to numpy
-    detections = detection_layer2(config, rois, mrcnn_probs, mrcnn_boxes, image_metas.unsqueeze(0))
+    detections = detection_layer2(config, rois, mrcnn_probs, mrcnn_boxes,
+                                  image_metas.unsqueeze(0))
 
-    #detections = detections.detach().cpu().numpy()
-    mrcnn_masks = mrcnn_masks.permute(0, 2, 3, 1)#.detach().cpu().numpy()
-    _, _, _, final_masks =\
-        unmold_detections2(detections, mrcnn_masks,
-                           image_shape[:2], window)
+    mrcnn_masks = mrcnn_masks.permute(0, 2, 3, 1)
+    _, _, _, final_masks = utils.unmold_detections(detections, mrcnn_masks,
+                                                   image_shape[:2], window)
     # print(f"final_rois {final_rois.shape}")
     # print(f"final_class_ids {final_class_ids.shape}")
     # print(f"final_masks {final_masks.shape}")
@@ -236,40 +247,12 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, mrcnn_masks,
     print(f"gt_boxes {gt_boxes.shape}")  # 200, 56, 56
 
     # print(f"masks {gt_masks.shape}")
-    _, _, full_gt_masks =\
-        unmold_boxes(gt_boxes, gt_class_ids, gt_masks,
-                     image_shape[:2], window)
+    full_gt_masks = utils.unmold_boxes(gt_boxes, gt_class_ids, gt_masks,
+                                       image_shape[:2], window)[3]
     #print(gt_masks.shape)
     #print(gt_boxes.shape)
     #print(gt_class_ids.shape)
     #print(image_shape[:2])
-
-    # Compute scale and shift to translate coordinates to image domain.
-    #``h_scale = image_shape[0] / (window[2] - window[0])
-    #``w_scale = image_shape[1] / (window[3] - window[1])
-    #``# scale = min(h_scale, w_scale)
-    #``shift = window[:2]  # y, x
-    #``scales = np.array([h_scale, w_scale, h_scale, w_scale])
-    #``shifts = np.array([shift[0], shift[1], shift[0], shift[1]])
-
-    #``# Translate bounding boxes to image domain
-    #``gt_boxes = np.multiply(gt_boxes - shifts, scales).astype(np.int32)
-
-    # move gt masks to image domain
-    #full_gt_masks = []
-    #for i in range(N):
-    #    # Convert neural network mask to full size mask
-    #    # print(gt_boxes[i])
-    #    y1, x1, y2, x2 = gt_boxes[i]
-    #    # TODO: gt_masks by default should not have problems
-    #    # use original masks
-    #    if y2-y1 <= 0 or x2-x1 <= 0:
-    #        continue
-    #    full_mask = utils.unmold_mask(gt_masks[i], gt_boxes[i].astype(np.int),
-    #                                  image_shape)
-    #    full_gt_masks.append(full_mask)
-    #full_gt_masks = np.stack(full_gt_masks, axis=-1)\
-    #    if full_gt_masks else np.empty((0,) + gt_masks.shape[1:3])
 
     # print("gt_masks in image domain {}".format(full_gt_masks.shape))
 
@@ -311,13 +294,12 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, mrcnn_masks,
         fp = torch.nonzero(hits.sum(dim=1) == 0).shape[0]
         fn = torch.nonzero(hits.sum(dim=0) == 0).shape[0]
         precisions[thresh_idx] = tp/(tp + fp + fn)
-        # print(f"{precision}")
 
     # average precisions
     precision = precisions.mean()
     print(f"precision: {precision}")
 
-    return
+    return precision
 
 
 def compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox,

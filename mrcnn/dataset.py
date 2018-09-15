@@ -300,18 +300,17 @@ class Dataset(torch.utils.data.Dataset):
 
         # Add to batch
         rpn_match = rpn_match[:, np.newaxis]
-        images = utils.subtract_mean(image, self.config)
+        image = utils.subtract_mean(image, self.config)
 
-        # TODO not images, but image here
         # Convert to tensors
-        images = torch.from_numpy(images.transpose(2, 0, 1)).float()
+        image = torch.from_numpy(image.transpose(2, 0, 1)).float()
         rpn_match = torch.from_numpy(rpn_match)
         rpn_bbox = torch.from_numpy(rpn_bbox).float()
         gt_class_ids = torch.from_numpy(gt_class_ids)
         gt_boxes = torch.from_numpy(gt_boxes).float()
         gt_masks = torch.from_numpy(gt_masks.astype(int).transpose(2, 0, 1)).float()
 
-        return images, image_metas, rpn_match, rpn_bbox, gt_class_ids,\
+        return image, image_metas, rpn_match, rpn_bbox, gt_class_ids,\
                gt_boxes, gt_masks
 
     def __len__(self):

@@ -8,7 +8,6 @@ Written by Waleed Abdulla
 """
 
 import datetime
-import math
 import os
 import re
 
@@ -20,130 +19,15 @@ import torch.optim as optim
 import torch.utils.data
 
 from mrcnn import utils
+from mrcnn.proposal import proposal_layer
+from mrcnn.detection import detection_layer
 from mrcnn.dataset import Dataset
-from mrcnn.losses import Losses, compute_losses
+from mrcnn.losses import Losses, compute_losses, compute_iou_loss
 from mrcnn import visualize
 from mrcnn.resnet import ResNet
+from mrcnn.rpn import RPN
 from mrcnn.fpn import FPN, Classifier, Mask
-from nms.nms_wrapper import nms
 from roialign.roi_align.crop_and_resize import CropAndResizeFunction
-from mrcnn.utils import SamePad2d
-
-
-############################################################
-#  Proposal Layer
-############################################################
-
-
-def apply_box_deltas(boxes, deltas):
-    """Applies the given deltas to the given boxes.
-    boxes: [batch_size, N, 4] where each row is y1, x1, y2, x2
-    deltas: [batch_size, N, 4] where each row is [dy, dx, log(dh), log(dw)]
-    """
-    # Convert to y, x, h, w
-    height = boxes[:, :, 2] - boxes[:, :, 0]
-    width = boxes[:, :, 3] - boxes[:, :, 1]
-    center_y = boxes[:, :, 0] + 0.5 * height
-    center_x = boxes[:, :, 1] + 0.5 * width
-    # Apply deltas
-    center_y += deltas[:, :, 0] * height
-    center_x += deltas[:, :, 1] * width
-    height *= torch.exp(deltas[:, :, 2])
-    width *= torch.exp(deltas[:, :, 3])
-    # Convert back to y1, x1, y2, x2
-    y1 = center_y - 0.5 * height
-    x1 = center_x - 0.5 * width
-    y2 = y1 + height
-    x2 = x1 + width
-    result = torch.stack([y1, x1, y2, x2], dim=2)
-    return result
-
-
-def clip_boxes(boxes, window):
-    """
-    boxes: [N, 4] each col is y1, x1, y2, x2
-    window: [4] in the form y1, x1, y2, x2
-    """
-    boxes = torch.stack(
-        [boxes[:, :, 0].clamp(float(window[0]), float(window[2])),
-         boxes[:, :, 1].clamp(float(window[1]), float(window[3])),
-         boxes[:, :, 2].clamp(float(window[0]), float(window[2])),
-         boxes[:, :, 3].clamp(float(window[1]), float(window[3]))], 2)
-    return boxes
-
-
-def proposal_layer(inputs, proposal_count, nms_threshold, anchors,
-                   config=None):
-    """Receives anchor scores and selects a subset to pass as proposals
-    to the second stage. Filtering is done based on anchor scores and
-    non-max suppression to remove overlaps. It also applies bounding
-    box refinment detals to anchors.
-
-    Inputs:
-        rpn_probs: [batch, anchors, (bg prob, fg prob)]
-        rpn_bbox: [batch, anchors, (dy, dx, log(dh), log(dw))]
-
-    Returns:
-        Proposals in normalized coordinates [batch, rois, (y1, x1, y2, x2)]
-    """
-
-    # Box Scores. Use the foreground class confidence. [Batch, num_rois, 1]
-    # TODO this only accepts one class
-    scores = inputs[0][:, :, 1]
-
-    # Box deltas [batch, num_rois, 4]
-    deltas = inputs[1]
-    # TODO constant
-    std_dev = torch.from_numpy(
-                  np.reshape(config.RPN_BBOX_STD_DEV, [1, 4])
-              ).float()
-    std_dev = std_dev.to(mrcnn.config.DEVICE)
-    deltas = deltas * std_dev
-
-    # Improve performance by trimming to top anchors by score
-    # and doing the rest on the smaller subset.
-    # TODO 6000 is hardcoded
-    pre_nms_limit = min(6000, anchors.size()[1])
-    scores, order = scores.topk(pre_nms_limit)
-
-    expanded_order = order.view(order.size()[0], -1, 1).expand(-1, -1, 4)
-    deltas = deltas.gather(1, expanded_order)
-    anchors = anchors.gather(1, expanded_order)
-
-    # Apply deltas to anchors to get refined anchors.
-    # [batch, N, (y1, x1, y2, x2)]
-    boxes = apply_box_deltas(anchors, deltas)
-
-    # Clip to image boundaries. [batch, N, (y1, x1, y2, x2)]
-    height, width = config.IMAGE_SHAPE[:2]
-    window = np.array([0, 0, height, width]).astype(np.float32)
-    boxes = clip_boxes(boxes, window)
-
-    # Filter out small boxes
-    # According to Xinlei Chen's paper, this reduces detection accuracy
-    # for small objects, so we're skipping it.
-
-    # Non-max suppression
-    nms_input = torch.cat((boxes,
-                           scores.reshape((boxes.size()[0:2] + (1,)))),
-                          2).detach()
-    boxes_end = []
-    for batch in range(boxes.size()[0]):
-        keep = nms(nms_input[batch], nms_threshold)
-        keep = keep[:proposal_count]
-        boxes_end.append(torch.unsqueeze(boxes[batch, keep, :], 0))
-
-    boxes = torch.cat(boxes_end, 0)
-    # boxes = boxes[keep, :]
-
-    # Normalize dimensions to range of 0 to 1.
-    norm = torch.tensor(np.array([height, width, height, width]),
-                        requires_grad=False,
-                        dtype=torch.float32)
-    norm = norm.to(mrcnn.config.DEVICE)
-    normalized_boxes = boxes / norm
-
-    return normalized_boxes
 
 
 ############################################################
@@ -363,252 +247,6 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks,
     # print("masks {}".format(masks.size()))
     return rois, roi_gt_class_ids, deltas, masks
 
-############################################################
-#  Detection Layer
-############################################################
-
-
-def clip_to_window(window, boxes):
-    """
-        window: (y1, x1, y2, x2). The window in the image we want to clip to.
-        boxes: [N, (y1, x1, y2, x2)]
-    """
-    boxes[:, 0] = boxes[:, 0].clamp(float(window[0]), float(window[2]))
-    boxes[:, 1] = boxes[:, 1].clamp(float(window[1]), float(window[3]))
-    boxes[:, 2] = boxes[:, 2].clamp(float(window[0]), float(window[2]))
-    boxes[:, 3] = boxes[:, 3].clamp(float(window[1]), float(window[3]))
-
-    return boxes
-
-
-def detection_layer2(config, rois, probs, deltas, image_meta):
-    """Refine classified proposals and filter overlaps and return final
-    detections.
-
-    Inputs:
-        rois: [N, (y1, x1, y2, x2)] in normalized coordinates
-        probs: [N, num_classes]. Class probabilities.
-        deltas: [N, num_classes, (dy, dx, log(dh), log(dw))]. Class-specific
-                bounding box deltas.
-        window: (y1, x1, y2, x2) in image coordinates. The part of the image
-            that contains the image excluding the padding.
-
-    Returns detections shaped: [N, (y1, x1, y2, x2, class_id, score)]
-    """
-    # Currently only supports batchsize 1
-    rois = rois.squeeze(0)
-
-    _, _, window, _ = utils.parse_image_meta(image_meta)
-    window = window[0]
-
-    # Class IDs per ROI
-    _, class_ids = torch.max(probs, dim=1)
-
-    # Class probability of the top class of each ROI
-    # Class-specific bounding box deltas
-    idx = torch.arange(class_ids.size()[0]).long()
-    idx = idx.to(mrcnn.config.DEVICE)
-    class_scores = probs[idx, class_ids.detach()]
-    deltas_specific = deltas[idx, class_ids[0].detach()]
-
-    # Apply bounding box deltas
-    # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
-    std_dev = torch.from_numpy(
-                  np.reshape(config.RPN_BBOX_STD_DEV, [1, 4])
-              ).float()
-    std_dev = std_dev.to(mrcnn.config.DEVICE)
-    refined_rois = apply_box_deltas(rois.unsqueeze(0),
-                                    (deltas_specific * std_dev).unsqueeze(0))
-    refined_rois = refined_rois.squeeze(0)
-
-    # Convert coordiates to image domain
-    height, width = config.IMAGE_SHAPE[:2]
-    scale = torch.from_numpy(np.array([height, width, height, width])).float()
-    scale = scale.to(mrcnn.config.DEVICE)
-    refined_rois *= scale
-
-    # Clip boxes to image window
-    refined_rois = clip_to_window(window, refined_rois)
-
-    # Round and cast to int since we're deadling with pixels now
-    refined_rois = torch.round(refined_rois)
-
-    # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]
-    # Coordinates are in image domain.
-    result = torch.cat((refined_rois,
-                        class_ids.unsqueeze(1).float(),
-                        class_scores.unsqueeze(1)), dim=1)
-
-    return result
-
-
-def detection_layer(config, rois, probs, deltas, image_meta):
-    """Refine classified proposals and filter overlaps and return final
-    detections.
-
-    Inputs:
-        rois: [N, (y1, x1, y2, x2)] in normalized coordinates
-        probs: [N, num_classes]. Class probabilities.
-        deltas: [N, num_classes, (dy, dx, log(dh), log(dw))]. Class-specific
-                bounding box deltas.
-        window: (y1, x1, y2, x2) in image coordinates. The part of the image
-            that contains the image excluding the padding.
-
-    Returns detections shaped: [N, (y1, x1, y2, x2, class_id, score)]
-    """
-    # Currently only supports batchsize 1
-    rois = rois.squeeze(0)
-
-    _, _, window, _ = utils.parse_image_meta(image_meta)
-    window = window[0]
-
-    # Class IDs per ROI
-    _, class_ids = torch.max(probs, dim=1)
-
-    # Class probability of the top class of each ROI
-    # Class-specific bounding box deltas
-    idx = torch.arange(class_ids.size()[0]).long()
-    idx = idx.to(mrcnn.config.DEVICE)
-    class_scores = probs[idx, class_ids.detach()]
-    deltas_specific = deltas[idx, class_ids[0].detach()]
-
-    # Apply bounding box deltas
-    # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
-    std_dev = torch.from_numpy(
-                  np.reshape(config.RPN_BBOX_STD_DEV, [1, 4])
-              ).float()
-    std_dev = std_dev.to(mrcnn.config.DEVICE)
-    refined_rois = apply_box_deltas(rois.unsqueeze(0),
-                                    (deltas_specific * std_dev).unsqueeze(0))
-    refined_rois = refined_rois.squeeze(0)
-
-    # Convert coordiates to image domain
-    height, width = config.IMAGE_SHAPE[:2]
-    scale = torch.from_numpy(np.array([height, width, height, width])).float()
-    scale = scale.to(mrcnn.config.DEVICE)
-    refined_rois *= scale
-
-    # Clip boxes to image window
-    refined_rois = clip_to_window(window, refined_rois)
-
-    # Round and cast to int since we're deadling with pixels now
-    refined_rois = torch.round(refined_rois)
-
-    # TODO: Filter out boxes with zero area
-
-    # Filter out background boxes
-    keep_bool = class_ids > 0
-
-    # Filter out low confidence boxes
-    if config.DETECTION_MIN_CONFIDENCE:
-        keep_bool = (keep_bool
-                     & (class_scores >= config.DETECTION_MIN_CONFIDENCE))
-    print(f"keep_bool {keep_bool}")
-    test = torch.nonzero(keep_bool)
-    print(f"test {test.size()}")
-    keep = torch.nonzero(keep_bool)[:, 0]
-
-    # Apply per-class NMS
-    pre_nms_class_ids = class_ids[keep.detach()]
-    pre_nms_scores = class_scores[keep.detach()]
-    pre_nms_rois = refined_rois[keep.detach()]
-    for i, class_id in enumerate(utils.unique1d(pre_nms_class_ids)):
-        # Pick detections of this class
-        ixs = torch.nonzero(pre_nms_class_ids.squeeze(0) == class_id)[:, 0]
-        ix_rois = pre_nms_rois[ixs.detach()]
-        ix_scores = pre_nms_scores[ixs.detach()]
-        # Sort
-        ix_scores, order = ix_scores.sort(descending=True, )
-        ix_rois = ix_rois[order.detach(), :]
-
-        class_keep = nms(torch.cat((ix_rois, ix_scores.unsqueeze(1)),
-                                   dim=1).detach(),
-                         config.DETECTION_NMS_THRESHOLD)
-
-        # Map indices
-        class_keep = keep[ixs[order[class_keep].detach()].detach()]
-
-        if i == 0:
-            nms_keep = class_keep
-        else:
-            nms_keep = utils.unique1d(torch.cat((nms_keep, class_keep)))
-    keep = utils.intersect1d(keep, nms_keep)
-
-    # Keep top detections
-    roi_count = config.DETECTION_MAX_INSTANCES
-    top_ids = class_scores[keep.detach()].sort(descending=True)[1][:roi_count]
-    keep = keep[top_ids.detach()]
-
-    # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]
-    # Coordinates are in image domain.
-    result = torch.cat((refined_rois[keep.detach()],
-                        class_ids[keep.detach()].unsqueeze(1).float(),
-                        class_scores[keep.detach()].unsqueeze(1)), dim=1)
-
-    return result
-
-
-############################################################
-#  Region Proposal Network
-############################################################
-
-
-class RPN(nn.Module):
-    """Builds the model of Region Proposal Network.
-
-    anchors_per_location: number of anchors per pixel in the feature map
-    anchor_stride: Controls the density of anchors. Typically 1 (anchors for
-                   every pixel in the feature map), or 2 (every other pixel).
-
-    Returns:
-        rpn_logits: [batch, H, W, 2] Anchor classifier logits (before softmax)
-        rpn_probs: [batch, W, W, 2] Anchor classifier probabilities.
-        rpn_bbox: [batch, H, W, (dy, dx, log(dh), log(dw))] Deltas to be
-                  applied to anchors.
-    """
-
-    def __init__(self, anchors_per_location, anchor_stride, depth):
-        super(RPN, self).__init__()
-        self.anchors_per_location = anchors_per_location
-        self.anchor_stride = anchor_stride
-        self.depth = depth
-
-        self.padding = SamePad2d(kernel_size=3, stride=self.anchor_stride)
-        self.conv_shared = nn.Conv2d(self.depth, 512, kernel_size=3,
-                                     stride=self.anchor_stride)
-        self.relu = nn.ReLU(inplace=True)
-        self.conv_class = nn.Conv2d(512, 2 * anchors_per_location,
-                                    kernel_size=1, stride=1)
-        self.softmax = nn.Softmax(dim=2)
-        self.conv_bbox = nn.Conv2d(512, 4 * anchors_per_location,
-                                   kernel_size=1, stride=1)
-
-    def forward(self, x):
-        # Shared convolutional base of the RPN
-        x = self.relu(self.conv_shared(self.padding(x)))
-
-        # Anchor Score. [batch, anchors per location * 2, height, width].
-        rpn_class_logits = self.conv_class(x)
-
-        # Reshape to [batch, 2, anchors]
-        rpn_class_logits = rpn_class_logits.permute(0, 2, 3, 1)
-        rpn_class_logits = rpn_class_logits.contiguous()
-        rpn_class_logits = rpn_class_logits.view(x.size()[0], -1, 2)
-
-        # Softmax on last dimension of BG/FG.
-        rpn_probs = self.softmax(rpn_class_logits)
-
-        # Bounding box refinement. [batch, H, W, anchors per location, depth]
-        # where depth is [x, y, log(w), log(h)]
-        rpn_bbox = self.conv_bbox(x)
-
-        # Reshape to [batch, 4, anchors]
-        rpn_bbox = rpn_bbox.permute(0, 2, 3, 1)
-        rpn_bbox = rpn_bbox.contiguous()
-        rpn_bbox = rpn_bbox.view(x.size()[0], -1, 4)
-
-        return [rpn_class_logits, rpn_probs, rpn_bbox]
-
 
 ############################################################
 #  MaskRCNN Class
@@ -814,7 +452,7 @@ class MaskRCNN(nn.Module):
         """
 
         # Mold inputs to format expected by the neural network
-        molded_images, image_metas, windows = mold_inputs(images, self.config)
+        molded_images, image_metas, windows = utils.mold_inputs(images, self.config)
 
         # Convert images to torch tensor
         molded_images = (torch.from_numpy(molded_images.transpose(0, 3, 1, 2))
@@ -828,23 +466,56 @@ class MaskRCNN(nn.Module):
             detections, mrcnn_mask = self.predict([molded_images, image_metas],
                                                   mode='inference')
 
-        # Convert to numpy
-        detections = detections.detach().cpu().numpy()
-        mrcnn_mask = mrcnn_mask.permute(0, 1, 3, 4, 2).detach().cpu().numpy()
+        mrcnn_mask = mrcnn_mask.permute(0, 1, 3, 4, 2)
 
         # Process detections
         results = []
         for i, image in enumerate(images):
             final_rois, final_class_ids, final_scores, final_masks =\
-                unmold_detections(detections[i], mrcnn_mask[i],
-                                  image.shape, windows[i])
+                utils.unmold_detections(detections[i], mrcnn_mask[i],
+                                        image.shape, windows[i])
             results.append({
-                "rois": final_rois,
-                "class_ids": final_class_ids,
-                "scores": final_scores,
-                "masks": final_masks,
+                "rois": final_rois.detach().cpu().numpy(),
+                "class_ids": final_class_ids.detach().cpu().numpy(),
+                "scores": final_scores.detach().cpu().numpy(),
+                "masks": final_masks.detach().cpu().numpy(),
             })
         return results
+
+    def compute_metric(self, testset):
+        # Data generators
+        testset = Dataset(testset, self.config)
+        test_generator = torch.utils.data.DataLoader(testset,
+                                                     batch_size=2,
+                                                     shuffle=False,
+                                                     num_workers=4)
+
+        utils.log(f"\nComputing metric.\n")
+
+        precisions = torch.empty((len(test_generator)),
+                                 device=mrcnn.config.DEVICE)
+        for idx, inputs in enumerate(test_generator):
+            # To GPU
+            images = inputs[0].to(mrcnn.config.DEVICE)
+            image_metas = inputs[1]
+            gt_class_ids = inputs[4].to(mrcnn.config.DEVICE)
+            gt_boxes = inputs[5].to(mrcnn.config.DEVICE)
+            gt_masks = inputs[6].to(mrcnn.config.DEVICE)
+
+            # Run object detection
+            with torch.no_grad():
+                outputs = self.predict([images, image_metas, gt_class_ids,
+                                       gt_boxes, gt_masks], mode='training')
+
+            # calculate Kaggle metric here
+            precision = compute_iou_loss(gt_masks[0], gt_boxes[0], gt_class_ids[0],
+                                         image_metas[0], outputs, self.config)
+#                             outputs[7][0], outputs[5][0], outputs[3][0],
+#                             image_metas[0], outputs[8][0], self.config,
+#                             outputs[9][0])
+            precisions[idx] = precision
+
+        print(f"Final precision: {precisions.mean()}")
 
     def predict(self, inputs, mode):
         molded_images = inputs[0]
@@ -1023,8 +694,7 @@ class MaskRCNN(nn.Module):
                                                     num_workers=4)
 
         # Train
-        utils.log("\nStarting at epoch {}. LR={}\n".format(self.epoch+1,
-                                                           learning_rate))
+        utils.log(f"\nStarting at epoch {self.epoch+1}. LR={learning_rate}\n")
         self.set_trainable(layers)
 
         # Optimizer object
@@ -1088,12 +758,6 @@ class MaskRCNN(nn.Module):
             outputs = self.predict([images, image_metas, gt_class_ids,
                                    gt_boxes, gt_masks], mode='training')
 
-            # TODO calculate Kaggle metric here
-            #compute_iou_loss(gt_masks[0], gt_boxes[0], gt_class_ids[0],
-            #                 outputs[7][0], outputs[5][0], outputs[3][0],
-            #                 image_metas[0], outputs[8][0], self.config,
-            #                 outputs[9][0])
-
             # Compute losses
             losses_epoch = compute_losses(rpn_match, rpn_bbox, *outputs[:-2])
 
@@ -1147,228 +811,3 @@ class MaskRCNN(nn.Module):
             losses_sum = losses_sum + losses_epoch/steps
 
         return losses_sum
-
-
-def mold_inputs(images, config):
-    """Takes a list of images and modifies them to the format expected
-    as an input to the neural network.
-    images: List of image matricies [height,width,depth]. Images can have
-        different sizes.
-
-    Returns 3 Numpy matricies:
-    molded_images: [N, h, w, 3]. Images resized and normalized.
-    image_metas: [N, length of meta data]. Details about each image.
-    windows: [N, (y1, x1, y2, x2)]. The portion of the image that has the
-        original image (padding excluded).
-    """
-    molded_images = []
-    image_metas = []
-    windows = []
-    for image in images:
-        # Resize image to fit the model expected size
-        molded_image, window, _, _, _ = utils.mold_image(image, config)
-        # Build image_meta
-        image_meta = utils.compose_image_meta(
-            0, image.shape, window,
-            np.zeros([config.NUM_CLASSES], dtype=np.int32))
-        # Append
-        molded_images.append(molded_image)
-        windows.append(window)
-        image_metas.append(image_meta)
-    # Pack into arrays
-    molded_images = np.stack(molded_images)
-    image_metas = np.stack(image_metas)
-    windows = np.stack(windows)
-    return molded_images, image_metas, windows
-
-
-def unmold_detections2(detections, mrcnn_mask, image_shape, window):
-    """Reformats the detections of one image from the format of the neural
-    network output to a format suitable for use in the rest of the
-    application.
-
-    detections: [N, (y1, x1, y2, x2, class_id, score)]
-    mrcnn_mask: [N, height, width, num_classes]
-    image_shape: [height, width, depth] Original size of the image
-                 before resizing
-    window: [y1, x1, y2, x2] Box in the image where the real image is
-            excluding the padding.
-
-    Returns:
-    boxes: [N, (y1, x1, y2, x2)] Bounding boxes in pixels
-    class_ids: [N] Integer class IDs for each bounding box
-    scores: [N] Float probability scores of the class_id
-    masks: [height, width, num_instances] Instance masks
-    """
-    N = detections.shape[0]
-
-    # Extract boxes, class_ids, scores, and class-specific masks
-    boxes = detections[:N, :4]
-    print(f"{boxes.shape}")
-    class_ids = detections[:N, 4].to(torch.long)
-    scores = detections[:N, 5]
-    masks = mrcnn_mask[torch.arange(N, dtype=torch.long), :, :, class_ids]
-
-    image_shape2 = (image_shape[0], image_shape[1])
-    image_shape = torch.tensor(image_shape, dtype=torch.float32, device=mrcnn.config.DEVICE)
-    window = torch.tensor(window, dtype=torch.float32, device=mrcnn.config.DEVICE)
-    # Compute scale and shift to translate coordinates to image domain.
-    h_scale = image_shape[0] / (window[2] - window[0])
-    w_scale = image_shape[1] / (window[3] - window[1])
-    shift = window[:2]  # y, x
-    scales = torch.tensor([h_scale, w_scale, h_scale, w_scale]).to(mrcnn.config.DEVICE)
-    shifts = torch.tensor([shift[0], shift[1], shift[0], shift[1]]).to(mrcnn.config.DEVICE)
-
-    # Translate bounding boxes to image domain
-    print(f"{boxes.shape} {scales.shape}")
-    boxes = ((boxes - shifts) * scales).to(torch.int32)
-    print(f"{boxes.shape}")
-
-    # Filter out detections with zero area. Often only happens in early
-    # stages of training when the network weights are still a bit random.
-    # TODO [0]  may not exist
-    keep_ix = torch.nonzero(
-        (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]) > 0)[:, 0]
-    if keep_ix.shape[0] != boxes.shape[0]:
-        boxes = boxes[keep_ix]
-        class_ids = class_ids[keep_ix]
-        scores = scores[keep_ix]
-        masks = masks[keep_ix]
-        N = class_ids.shape[0]
-
-    # Resize masks to original image size and set boundary threshold.
-    full_masks = []
-    for i in range(N):
-        # Convert neural network mask to full size mask
-        full_mask = utils.unmold_mask_gpu(masks[i], boxes[i], image_shape2)
-        full_masks.append(full_mask)
-    full_masks = torch.stack(full_masks, dim=-1)\
-        if full_masks else np.empty((0,) + masks.shape[1:3])
-
-    return boxes, class_ids, scores, full_masks
-
-
-def unmold_boxes(boxes, class_ids, masks, image_shape, window):
-    """Reformats the detections of one image from the format of the neural
-    network output to a format suitable for use in the rest of the
-    application.
-
-    detections: [N, (y1, x1, y2, x2, class_id, score)]
-    mrcnn_mask: [N, height, width, num_classes]
-    image_shape: [height, width, depth] Original size of the image
-                 before resizing
-    window: [y1, x1, y2, x2] Box in the image where the real image is
-            excluding the padding.
-
-    Returns:
-    boxes: [N, (y1, x1, y2, x2)] Bounding boxes in pixels
-    class_ids: [N] Integer class IDs for each bounding box
-    scores: [N] Float probability scores of the class_id
-    masks: [height, width, num_instances] Instance masks
-    """
-    N = boxes.shape[0]
-
-    # Extract boxes, class_ids, scores, and class-specific masks
-    class_ids = class_ids.to(torch.long)
-
-    image_shape2 = (image_shape[0], image_shape[1])
-    image_shape = torch.tensor(image_shape, dtype=torch.float32, device=mrcnn.config.DEVICE)
-    window = torch.tensor(window, dtype=torch.float32, device=mrcnn.config.DEVICE)
-    # Compute scale and shift to translate coordinates to image domain.
-    h_scale = image_shape[0] / (window[2] - window[0])
-    w_scale = image_shape[1] / (window[3] - window[1])
-    shift = window[:2]  # y, x
-    scales = torch.tensor([h_scale, w_scale, h_scale, w_scale]).to(mrcnn.config.DEVICE)
-    shifts = torch.tensor([shift[0], shift[1], shift[0], shift[1]]).to(mrcnn.config.DEVICE)
-
-    # Translate bounding boxes to image domain
-    boxes = ((boxes - shifts) * scales).to(torch.int32)
-
-    # Filter out detections with zero area. Often only happens in early
-    # stages of training when the network weights are still a bit random.
-    # TODO [0]  may not exist
-    keep_ix = torch.nonzero(
-        (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]) > 0)[:, 0]
-    keep_ix = keep_ix
-    if keep_ix.shape[0] != boxes.shape[0]:
-        boxes = boxes[keep_ix]
-        class_ids = class_ids[keep_ix]
-        masks = masks[keep_ix]
-        N = class_ids.shape[0]
-
-    # Resize masks to original image size and set boundary threshold.
-    full_masks = []
-    # full_masks = torch.tensor((N))
-    for i in range(N):
-        # Convert neural network mask to full size mask
-        full_mask = utils.unmold_mask_gpu(masks[i], boxes[i], image_shape2)
-        full_masks.append(full_mask)
-    full_masks = torch.stack(full_masks, dim=-1)\
-        if full_masks else np.empty((0,) + masks.shape[1:3])
-
-    return boxes, class_ids, full_masks
-
-
-def unmold_detections(detections, mrcnn_mask, image_shape, window):
-    """Reformats the detections of one image from the format of the neural
-    network output to a format suitable for use in the rest of the
-    application.
-
-    detections: [N, (y1, x1, y2, x2, class_id, score)]
-    mrcnn_mask: [N, height, width, num_classes]
-    image_shape: [height, width, depth] Original size of the image
-                 before resizing
-    window: [y1, x1, y2, x2] Box in the image where the real image is
-            excluding the padding.
-
-    Returns:
-    boxes: [N, (y1, x1, y2, x2)] Bounding boxes in pixels
-    class_ids: [N] Integer class IDs for each bounding box
-    scores: [N] Float probability scores of the class_id
-    masks: [height, width, num_instances] Instance masks
-    """
-    # How many detections do we have?
-    # Detections array is padded with zeros. Find the first class_id == 0.
-    zero_ix = np.where(detections[:, 4] == 0)[0]
-    N = zero_ix[0] if zero_ix.shape[0] > 0 else detections.shape[0]
-
-    # Extract boxes, class_ids, scores, and class-specific masks
-    boxes = detections[:N, :4]
-    class_ids = detections[:N, 4].astype(np.int32)
-    scores = detections[:N, 5]
-    masks = mrcnn_mask[np.arange(N), :, :, class_ids]
-
-    # Compute scale and shift to translate coordinates to image domain.
-    h_scale = image_shape[0] / (window[2] - window[0])
-    w_scale = image_shape[1] / (window[3] - window[1])
-    # scale = min(h_scale, w_scale)
-    shift = window[:2]  # y, x
-    # scales = np.array([scale, scale, scale, scale])
-    scales = np.array([h_scale, w_scale, h_scale, w_scale])
-    shifts = np.array([shift[0], shift[1], shift[0], shift[1]])
-
-    # Translate bounding boxes to image domain
-    boxes = np.multiply(boxes - shifts, scales).astype(np.int32)
-
-    # Filter out detections with zero area. Often only happens in early
-    # stages of training when the network weights are still a bit random.
-    exclude_ix = np.where(
-        (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1]) <= 0)[0]
-    if exclude_ix.shape[0] > 0:
-        boxes = np.delete(boxes, exclude_ix, axis=0)
-        class_ids = np.delete(class_ids, exclude_ix, axis=0)
-        scores = np.delete(scores, exclude_ix, axis=0)
-        masks = np.delete(masks, exclude_ix, axis=0)
-        N = class_ids.shape[0]
-
-    # Resize masks to original image size and set boundary threshold.
-    full_masks = []
-    for i in range(N):
-        # Convert neural network mask to full size mask
-        full_mask = utils.unmold_mask(masks[i], boxes[i], image_shape)
-        full_masks.append(full_mask)
-    full_masks = np.stack(full_masks, axis=-1)\
-        if full_masks else np.empty((0,) + masks.shape[1:3])
-
-    return boxes, class_ids, scores, full_masks
-

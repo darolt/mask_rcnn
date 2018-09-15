@@ -19,20 +19,20 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 """
 
 import matplotlib
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 import os
 import torch
 import datetime
 import numpy as np
-import skimage.io
+import argparse
 
+from skimage.io import imread
 from imgaug import augmenters as iaa
 from mrcnn import visualize
 import mrcnn.config
 from mrcnn import utils
 from mrcnn import model as modellib
-from mrcnn import dataset
 
 matplotlib.use('Agg')
 
@@ -218,13 +218,14 @@ class NucleusDataset(utils.Dataset):
         """
         info = self.image_info[image_id]
         # Get mask directory from image path
-        mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])), "masks")
+        mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])),
+                                "masks")
 
         # Read mask files from .png image
         mask = []
         for f in next(os.walk(mask_dir))[2]:
             if f.endswith(".png"):
-                m = skimage.io.imread(os.path.join(mask_dir, f)).astype(np.bool)
+                m = imread(os.path.join(mask_dir, f), as_gray=True).astype(np.bool)
                 mask.append(m)
         mask = np.stack(mask, axis=-1)
         # Return mask, and array of class IDs of each instance. Since we have
@@ -376,6 +377,7 @@ def detect(model, dataset_dir, subset):
             title="Predictions")
         img.savefig("{}/{}.png".format(submit_dir,
                                        dataset.image_info[image_id]["id"]))
+        plt.close()
 
     # Save to csv file
     submission = "ImageId,EncodedPixels\n" + "\n".join(submission)
@@ -384,23 +386,30 @@ def detect(model, dataset_dir, subset):
         f.write(submission)
     print("Saved to ", submit_dir)
 
+
+def compute_metric(model, dataset_dir, subset):
+    print("Running on {dataset_dir}")
+    testset = NucleusDataset()
+    testset.load_nucleus(dataset_dir, subset)
+    testset.prepare()
+
+    model.compute_metric(testset)
+
 ############################################################
 #  Command Line
 ############################################################
 
 
 if __name__ == '__main__':
-    import argparse
-
     # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description='Train Mask R-CNN on MS COCO.')
+    descr = "Train Mask R-CNN on Kaggle's Data Science Bowl 2018 dataset."
+    parser = argparse.ArgumentParser(description=descr)
     parser.add_argument("command",
                         metavar="<command>",
-                        help="'train' or 'evaluate' on MS COCO")
+                        help="'train' or 'detect'")
     parser.add_argument('--dataset', required=True,
                         metavar="/path/to/coco/",
-                        help='Directory of the MS-COCO dataset')
+                        help='Directory of the dataset')
     parser.add_argument('--model', required=False,
                         metavar="/path/to/weights.pth",
                         help="Path to weights .pth file or 'coco'")
@@ -425,11 +434,9 @@ if __name__ == '__main__':
 
     # Create model
     if args.command == "train":
-        model = modellib.MaskRCNN(config=config,
-                                  model_dir=args.logs)
+        model = modellib.MaskRCNN(config=config, model_dir=args.logs)
     else:
-        model = modellib.MaskRCNN(config=config,
-                                  model_dir=args.logs)
+        model = modellib.MaskRCNN(config=config, model_dir=args.logs)
 
     # Select weights file to load
     if args.model:
@@ -465,6 +472,7 @@ if __name__ == '__main__':
         train(model, args.dataset, 'train')
     elif args.command == "detect":
         detect(model, args.dataset, 'val')
+    elif args.command == "metric":
+        compute_metric(model, args.dataset, 'stage1_test')
     else:
-        print("'{}' is not recognized. "
-              "Use 'train' or 'detect'".format(args.command))
+        print(f"'{args.command}' is not recognized. Use 'train' or 'detect'")
