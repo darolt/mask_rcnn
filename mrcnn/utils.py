@@ -217,9 +217,9 @@ def mold_inputs(images, config):
     windows = []
     for image in images:
         # Resize image to fit the model expected size
-        molded_image, window, _, _, _ = utils.mold_image(image, config)
+        molded_image, window, _, _, _ = mold_image(image, config)
         # Build image_meta
-        image_meta = utils.compose_image_meta(
+        image_meta = compose_image_meta(
             0, image.shape, window,
             np.zeros([config.NUM_CLASSES], dtype=np.int32))
         # Append
@@ -320,6 +320,9 @@ class Dataset(object):
         # Background is always the first class
         self.class_info = [{"source": "", "id": 0, "name": "BG"}]
         self.source_class_ids = {}
+
+    def __len__(self):
+        return len(self._image_ids)
 
     def add_class(self, source, class_id, class_name):
         assert "." not in source, "Source name cannot contain a dot"

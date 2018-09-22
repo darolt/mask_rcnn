@@ -16,6 +16,9 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 
     # Detect nuclei from dataset, example:
     python samples/nuclei.py detect --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
+
+    # Get Kaggle's 2018 Databowl metric from dataset, example:
+    python samples/nuclei.py metric --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
 """
 
 import matplotlib
@@ -33,6 +36,7 @@ from mrcnn import visualize
 import mrcnn.config
 from mrcnn import utils
 from mrcnn import model as modellib
+from mrcnn import losses
 
 matplotlib.use('Agg')
 
@@ -172,6 +176,11 @@ class NucleusDataset(utils.Dataset):
     """Handles nuclei dataset.
     """
 
+    def __init__(self, dataset_dir, subset):
+        super().__init__()
+        self.load_nucleus(dataset_dir, subset)
+        self.prepare()
+
     def load_nucleus(self, dataset_dir, subset):
         """Load a subset of the nuclei dataset.
 
@@ -304,15 +313,8 @@ def mask_to_rle(image_id, mask, scores):
 
 def train(model, dataset_dir, subset):
     """Train the model."""
-    # Training dataset.
-    dataset_train = NucleusDataset()
-    dataset_train.load_nucleus(dataset_dir, subset)
-    dataset_train.prepare()
-
-    # Validation dataset
-    dataset_val = NucleusDataset()
-    dataset_val.load_nucleus(dataset_dir, "val")
-    dataset_val.prepare()
+    dataset_train = NucleusDataset(dataset_dir, subset)
+    dataset_val = NucleusDataset(dataset_dir, "val")
 
     # Image augmentation
     # http://imgaug.readthedocs.io/en/latest/source/augmenters.html
@@ -355,9 +357,7 @@ def detect(model, dataset_dir, subset):
     os.makedirs(submit_dir)
 
     # Read dataset
-    dataset = NucleusDataset()
-    dataset.load_nucleus(dataset_dir, subset)
-    dataset.prepare()
+    dataset = NucleusDataset(dataset_dir, subset)
     # Load over images
     submission = []
     for image_id in dataset.image_ids:
@@ -365,6 +365,7 @@ def detect(model, dataset_dir, subset):
         image = dataset.load_image(image_id)
         # Detect objects
         r = model.detect([image])[0]
+        r = {k: v.detach().cpu().numpy() for k, v in r.items()}
         # Encode image to RLE. Returns a string of multiple lines
         source_id = dataset.image_info[image_id]["id"]
         rle = mask_to_rle(source_id, r["masks"], r["scores"])
@@ -388,12 +389,26 @@ def detect(model, dataset_dir, subset):
 
 
 def compute_metric(model, dataset_dir, subset):
-    print("Running on {dataset_dir}")
-    testset = NucleusDataset()
-    testset.load_nucleus(dataset_dir, subset)
-    testset.prepare()
+    """Run detection on dataset and compute Kaggle's 2018 Databowl metric."""
+    print("Running on {}".format(dataset_dir))
 
-    model.compute_metric(testset)
+    # Read dataset
+    dataset = NucleusDataset(dataset_dir, subset)
+    # Load over images
+    precisions = torch.empty((len(dataset)),
+                             device=mrcnn.config.DEVICE)
+    for idx, image_id in enumerate(dataset.image_ids):
+        # Load image and run detection
+        image = dataset.load_image(image_id)
+        masks, _ = dataset.load_mask(image_id)
+        masks = torch.from_numpy(masks.astype(int))
+        # Detect objects
+        prediction = model.detect([image])[0]
+        precision = losses.compute_iou_loss2(masks, prediction['masks'])
+        print(f"precision {precision}")
+        precisions[idx] = precision
+
+    print(f"final precision: {precisions.mean()}")
 
 ############################################################
 #  Command Line

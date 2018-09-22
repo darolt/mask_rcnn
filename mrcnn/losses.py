@@ -188,103 +188,92 @@ def compute_mrcnn_mask_loss(target_masks, target_class_ids, pred_masks):
     return loss
 
 
-#def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, mrcnn_masks,
-#                     mrcnn_boxes, mrcnn_class_logits, image_metas,
-#                     rois, config, mrcnn_probs):
+def compute_iou_loss2(gt_masks, pred_masks):
+    ious = compute_ious(gt_masks, pred_masks)
+
+    return compute_precision(ious)
+
 
 def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
-                     predictions, config):
+                     predictions, config, detections=None, mrcnn_masks=None):
     """Compute loss for single image according to:
        https://www.kaggle.com/c/data-science-bowl-2018#evaluation
     """
-    mrcnn_masks = predictions[7][0]
-    mrcnn_boxes = predictions[5][0]
-    mrcnn_class_logits = predictions[3][0]
-    mrcnn_probs = predictions[9][0]
-    rois = predictions[8][0]
-    print(f"mrcnn_masks {mrcnn_masks.shape}")  # X, 28, 28
-    # print("mrcnn_boxes {}".format(mrcnn_boxes.size()))  # X, 2, 4
-    # print("mrcnn_class_logits {}".format(mrcnn_class_logits.size()))  # X, 2
-    # print(f"mrcnn_probs {mrcnn_probs.size()}")  # X, 2
-    # print("gt_boxes {}".format(gt_boxes.size()))  # 200, 4
-    # print("gt_class_ids {}".format(gt_class_ids.size()))  # 200
-    # print("rois {}".format(rois.size()))  # 200
+    if not detections:
+        mrcnn_masks = predictions[7][0]
+        mrcnn_boxes = predictions[5][0]
+        mrcnn_class_logits = predictions[3][0]
+        mrcnn_probs = predictions[9][0]
+        rois = predictions[8][0]
+        print(f"mrcnn_masks {mrcnn_masks.shape}")  # X, 28, 28
 
-    # print("image_metas {}".format(image_metas))
-    # id, h, w, d, xi, yi, xf, yf, [active_class_ids]
+        if mrcnn_class_logits.nelement() == 0:
+            print("no predictions")
+            return
 
-    if mrcnn_class_logits.nelement() == 0:
-        print("no predictions")
-        return
-
-    # 1 - unmold gt and mrcnn masks
+        detections = detection_layer2(config, rois, mrcnn_probs, mrcnn_boxes,
+                                      image_metas.unsqueeze(0))
 
     # remove zeros (padding)
     image_shape = np.array(image_metas[1:4])
     window = np.array(image_metas[4:8])
-    # print(image_shape)
-    # print(gt_class_ids.shape)
     zero_ix = np.where(gt_class_ids == 0)[0]
-    # print(f"{zero_ix.shape}")
     N = zero_ix[0] if zero_ix.shape[0] > 0 else gt_class_ids.shape[0]
 
-    detections = detection_layer2(config, rois, mrcnn_probs, mrcnn_boxes,
-                                  image_metas.unsqueeze(0))
-
+    # 1 - unmold gt and mrcnn masks
     mrcnn_masks = mrcnn_masks.permute(0, 2, 3, 1)
-    _, _, _, final_masks = utils.unmold_detections(detections, mrcnn_masks,
-                                                   image_shape[:2], window)
-    # print(f"final_rois {final_rois.shape}")
-    # print(f"final_class_ids {final_class_ids.shape}")
-    # print(f"final_masks {final_masks.shape}")
-    # print(f"detections {detections.shape}")
-    # print(f"ids {ids.size()}")
-    # print(f"mrcnn_masks {mrcnn_masks.shape}")
+    final_masks = utils.unmold_detections(detections, mrcnn_masks,
+                                          image_shape[:2], window)[3]
 
     gt_masks = gt_masks[:N].detach()
     gt_boxes = gt_boxes[:N].detach()
-    print(f"gt_masks {gt_masks.shape}")  # 200, 56, 56
-    print(f"gt_boxes {gt_boxes.shape}")  # 200, 56, 56
+    print(f"gt_masks {gt_masks.shape}")
+    print(f"gt_boxes {gt_boxes.shape}")
 
-    # print(f"masks {gt_masks.shape}")
     full_gt_masks = utils.unmold_boxes(gt_boxes, gt_class_ids, gt_masks,
                                        image_shape[:2], window)[3]
-    #print(gt_masks.shape)
-    #print(gt_boxes.shape)
-    #print(gt_class_ids.shape)
-    #print(image_shape[:2])
 
-    # print("gt_masks in image domain {}".format(full_gt_masks.shape))
+    ious = compute_ious(full_gt_masks, final_masks)
 
+    precision = compute_precision(ious)
+    print(f"precision: {precision}")
+
+    return precision
+
+
+def compute_ious(gt_masks, pred_masks):
     # compute IOUs
-    full_gt_masks = full_gt_masks.to(torch.uint8)
-    final_masks = final_masks.to(torch.uint8)
-    print(f"final_gt_masks {full_gt_masks.shape}")
-    print(f"final_masks {final_masks.shape}")
-    ious = torch.zeros((full_gt_masks.shape[2], final_masks.shape[2]),
+    gt_masks = gt_masks.to(torch.uint8)
+    pred_masks = pred_masks.to(torch.uint8)
+    print(f"gt_masks  {gt_masks.shape}")
+    print(f"pred_masks {pred_masks.shape}")
+    ious = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
                        dtype=torch.float)
-    print(f"{full_gt_masks.shape[2]} x {final_masks.shape[2]}")
-    for gt_idx in range(0, full_gt_masks.shape[2]):
-        for pred_idx in range(0, final_masks.shape[2]):
-            # intersection = np.logical_and(final_masks[:, :, pred_idx],
-            #                              full_gt_masks[:, :, gt_idx])
-            intersection = final_masks[:, :, pred_idx] & full_gt_masks[:, :, gt_idx]
+    print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
+    for gt_idx in range(0, gt_masks.shape[2]):
+        for pred_idx in range(0, pred_masks.shape[2]):
+            # intersection = np.logical_and(pred_masks[:, :, pred_idx],
+            #                              gt_masks[:, :, gt_idx])
+            intersection = pred_masks[:, :, pred_idx] & gt_masks[:, :, gt_idx]
             # intersection = np.count_nonzero(intersection)
             intersection = torch.nonzero(intersection).shape[0]
-            # union = np.logical_or(final_masks[:, :, pred_idx],
-            #                      full_gt_masks[:, :, gt_idx])
+            # union = np.logical_or(pred_masks[:, :, pred_idx],
+            #                      gt_masks[:, :, gt_idx])
             # union = np.count_nonzero(union)
-            union = final_masks[:, :, pred_idx] | full_gt_masks[:, :, gt_idx]
+            union = pred_masks[:, :, pred_idx] | gt_masks[:, :, gt_idx]
             union = torch.nonzero(union).shape[0]
             iou = intersection/union if union != 0.0 else 0.0
             # if union == 0:
             #     print(f"{gt_idx} {pred_idx} {intersection} {union}")
-            #     gt_area = torch.nonzero(full_gt_masks[:, :, gt_idx]).shape[0]
-            #     pred_area = torch.nonzero(final_masks[:, :, pred_idx]).shape[0]
+            #     gt_area = torch.nonzero gt_masks[:, :, gt_idx]).shape[0]
+            #     pred_area = torch.nonzero(pred_masks[:, :, pred_idx]).shape[0]
             #     print(f"{gt_area} {pred_area}")
             ious[gt_idx, pred_idx] = iou
             # print(f"{gt_idx} {pred_idx} {intersection} {union} {iou}")
+    return ious
 
+
+def compute_precision(ious):
     # compute hits
     thresholds = torch.arange(0.5, 1.0, 0.05)
     precisions = torch.empty_like(thresholds, device=mrcnn.config.DEVICE)
@@ -296,25 +285,13 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
         precisions[thresh_idx] = tp/(tp + fp + fn)
 
     # average precisions
-    precision = precisions.mean()
-    print(f"precision: {precision}")
-
-    return precision
+    return precisions.mean()
 
 
 def compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox,
                    target_class_ids, mrcnn_class_logits, target_deltas,
                    mrcnn_bbox, target_mask, mrcnn_mask):
 
-    # print(rpn_match[0].size()) # 65472, 1, const
-    # print(rpn_bbox[0].size()) # 64, 4, const
-    # print(rpn_class_logits[0].size()) # 65472, 2, const
-    # print(rpn_pred_bbox[0].size()) # 65472, 4, const
-    # print(target_class_ids[0].size()) # 3/109
-    # print(target_deltas[0].size()) # 3/109, 4
-    # print(mrcnn_bbox[0].size()) # 3/109, 2, 4
-    # print(target_mask[0].size()) # 3/109, 28, 28
-    # print(mrcnn_mask[0].size()) # 3/109, 2, 28, 28
     rpn_class_loss = compute_rpn_class_loss(rpn_match, rpn_class_logits)
     rpn_bbox_loss = compute_rpn_bbox_loss(rpn_bbox, rpn_match, rpn_pred_bbox)
     mrcnn_class_loss = torch.tensor([0.0], dtype=torch.float32,
@@ -342,5 +319,3 @@ def compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox,
 
     return Losses(rpn_class_loss, rpn_bbox_loss, mrcnn_class_loss,
                   mrcnn_bbox_loss, mrcnn_mask_loss)
-
-

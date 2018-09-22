@@ -475,47 +475,12 @@ class MaskRCNN(nn.Module):
                 utils.unmold_detections(detections[i], mrcnn_mask[i],
                                         image.shape, windows[i])
             results.append({
-                "rois": final_rois.detach().cpu().numpy(),
-                "class_ids": final_class_ids.detach().cpu().numpy(),
-                "scores": final_scores.detach().cpu().numpy(),
-                "masks": final_masks.detach().cpu().numpy(),
+                "rois": final_rois,
+                "class_ids": final_class_ids,
+                "scores": final_scores,
+                "masks": final_masks,
             })
         return results
-
-    def compute_metric(self, testset):
-        # Data generators
-        testset = Dataset(testset, self.config)
-        test_generator = torch.utils.data.DataLoader(testset,
-                                                     batch_size=2,
-                                                     shuffle=False,
-                                                     num_workers=4)
-
-        utils.log(f"\nComputing metric.\n")
-
-        precisions = torch.empty((len(test_generator)),
-                                 device=mrcnn.config.DEVICE)
-        for idx, inputs in enumerate(test_generator):
-            # To GPU
-            images = inputs[0].to(mrcnn.config.DEVICE)
-            image_metas = inputs[1]
-            gt_class_ids = inputs[4].to(mrcnn.config.DEVICE)
-            gt_boxes = inputs[5].to(mrcnn.config.DEVICE)
-            gt_masks = inputs[6].to(mrcnn.config.DEVICE)
-
-            # Run object detection
-            with torch.no_grad():
-                outputs = self.predict([images, image_metas, gt_class_ids,
-                                       gt_boxes, gt_masks], mode='training')
-
-            # calculate Kaggle metric here
-            precision = compute_iou_loss(gt_masks[0], gt_boxes[0], gt_class_ids[0],
-                                         image_metas[0], outputs, self.config)
-#                             outputs[7][0], outputs[5][0], outputs[3][0],
-#                             image_metas[0], outputs[8][0], self.config,
-#                             outputs[9][0])
-            precisions[idx] = precision
-
-        print(f"Final precision: {precisions.mean()}")
 
     def predict(self, inputs, mode):
         molded_images = inputs[0]
@@ -589,11 +554,7 @@ class MaskRCNN(nn.Module):
                                          mrcnn_bbox, image_metas)
 
             # Convert boxes to normalized coordinates
-            # TODO: let DetectionLayer return normalized coordinates to avoid
-            #       unnecessary conversions
             detection_boxes = detections[:, :4]/scale
-
-            # Add back batch dimension
             detection_boxes = detection_boxes.unsqueeze(0)
 
             # Create masks for detections

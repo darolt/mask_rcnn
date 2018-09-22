@@ -90,9 +90,8 @@ def detection_layer(config, rois, probs, deltas, image_meta):
 
     Returns detections shaped: [N, (y1, x1, y2, x2, class_id, score)]
     """
-    refined_rois, class_ids, class_scores = detection_layer3(config, rois,
-                                                             probs, deltas,
-                                                             image_meta)
+    det_out = detection_layer3(config, rois, probs, deltas, image_meta)
+    refined_rois, class_ids, class_scores = det_out
 
     # TODO: Filter out boxes with zero area
 
@@ -141,5 +140,3 @@ def detection_layer(config, rois, probs, deltas, image_meta):
     return torch.cat((refined_rois[keep.detach()],
                      class_ids[keep.detach()].unsqueeze(1).float(),
                      class_scores[keep.detach()].unsqueeze(1)), dim=1)
-
-
