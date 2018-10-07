@@ -191,7 +191,7 @@ def compute_mrcnn_mask_loss(target_masks, target_class_ids, pred_masks):
 def compute_iou_loss2(gt_masks, pred_masks):
     ious = compute_ious(gt_masks, pred_masks)
 
-    return compute_precision(ious)
+    return compute_mAP(ious)
 
 
 def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
@@ -235,7 +235,7 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
 
     ious = compute_ious(full_gt_masks, final_masks)
 
-    precision = compute_precision(ious)
+    precision = compute_mAP(ious)
     print(f"precision: {precision}")
 
     return precision
@@ -252,28 +252,17 @@ def compute_ious(gt_masks, pred_masks):
     print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
     for gt_idx in range(0, gt_masks.shape[2]):
         for pred_idx in range(0, pred_masks.shape[2]):
-            # intersection = np.logical_and(pred_masks[:, :, pred_idx],
-            #                              gt_masks[:, :, gt_idx])
             intersection = pred_masks[:, :, pred_idx] & gt_masks[:, :, gt_idx]
-            # intersection = np.count_nonzero(intersection)
             intersection = torch.nonzero(intersection).shape[0]
-            # union = np.logical_or(pred_masks[:, :, pred_idx],
-            #                      gt_masks[:, :, gt_idx])
-            # union = np.count_nonzero(union)
             union = pred_masks[:, :, pred_idx] | gt_masks[:, :, gt_idx]
             union = torch.nonzero(union).shape[0]
             iou = intersection/union if union != 0.0 else 0.0
-            # if union == 0:
-            #     print(f"{gt_idx} {pred_idx} {intersection} {union}")
-            #     gt_area = torch.nonzero gt_masks[:, :, gt_idx]).shape[0]
-            #     pred_area = torch.nonzero(pred_masks[:, :, pred_idx]).shape[0]
-            #     print(f"{gt_area} {pred_area}")
             ious[gt_idx, pred_idx] = iou
-            # print(f"{gt_idx} {pred_idx} {intersection} {union} {iou}")
     return ious
 
 
-def compute_precision(ious):
+def compute_mAP(ious):
+    """Compute mean average precision."""
     # compute hits
     thresholds = torch.arange(0.5, 1.0, 0.05)
     precisions = torch.empty_like(thresholds, device=mrcnn.config.DEVICE)
@@ -288,34 +277,32 @@ def compute_precision(ious):
     return precisions.mean()
 
 
-def compute_losses(rpn_match, rpn_bbox, rpn_class_logits, rpn_pred_bbox,
-                   target_class_ids, mrcnn_class_logits, target_deltas,
-                   mrcnn_bbox, target_mask, mrcnn_mask):
+def compute_losses(rpn_target, rpn_out, mrcnn_targets, mrcnn_outs):
 
-    rpn_class_loss = compute_rpn_class_loss(rpn_match, rpn_class_logits)
-    rpn_bbox_loss = compute_rpn_bbox_loss(rpn_bbox, rpn_match, rpn_pred_bbox)
+    rpn_class_loss = compute_rpn_class_loss(rpn_target.match,
+                                            rpn_out.class_logits)
+    rpn_bbox_loss = compute_rpn_bbox_loss(rpn_target.deltas,
+                                          rpn_target.match, rpn_out.deltas)
     mrcnn_class_loss = torch.tensor([0.0], dtype=torch.float32,
                                     device=mrcnn.config.DEVICE)
     mrcnn_bbox_loss = torch.tensor([0.0], dtype=torch.float32,
                                    device=mrcnn.config.DEVICE)
     mrcnn_mask_loss = torch.tensor([0.0], dtype=torch.float32,
                                    device=mrcnn.config.DEVICE)
-    for batch in range(0, len(target_class_ids)):
-        mrcnn_class_loss += compute_mrcnn_class_loss(target_class_ids[batch],
-                                                     mrcnn_class_logits[batch])
-        mrcnn_bbox_loss += compute_mrcnn_bbox_loss(target_deltas[batch],
-                                                   target_class_ids[batch],
-                                                   mrcnn_bbox[batch])
-        mrcnn_mask_loss += compute_mrcnn_mask_loss(target_mask[batch],
-                                                   target_class_ids[batch],
-                                                   mrcnn_mask[batch])
+    for batch in range(0, len(mrcnn_targets)):
+        mrcnn_class_loss += compute_mrcnn_class_loss(
+            mrcnn_targets[batch].class_ids, mrcnn_outs[batch].class_logits)
+        mrcnn_bbox_loss += compute_mrcnn_bbox_loss(
+            mrcnn_targets[batch].deltas, mrcnn_targets[batch].class_ids,
+            mrcnn_outs[batch].deltas)
+        mrcnn_mask_loss += compute_mrcnn_mask_loss(
+            mrcnn_targets[batch].masks, mrcnn_targets[batch].class_ids,
+            mrcnn_outs[batch].masks)
 
-    if len(mrcnn_class_logits) != 0:
-        mrcnn_class_loss /= len(target_class_ids)
-    if len(mrcnn_bbox) != 0:
-        mrcnn_bbox_loss /= len(target_class_ids)
-    if len(mrcnn_mask) != 0:
-        mrcnn_mask_loss /= len(target_class_ids)
+    if len(mrcnn_outs) != 0:
+        mrcnn_class_loss /= len(mrcnn_outs)
+        mrcnn_bbox_loss /= len(mrcnn_outs)
+        mrcnn_mask_loss /= len(mrcnn_outs)
 
     return Losses(rpn_class_loss, rpn_bbox_loss, mrcnn_class_loss,
                   mrcnn_bbox_loss, mrcnn_mask_loss)

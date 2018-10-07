@@ -14,10 +14,11 @@ class RPN(nn.Module):
                    every pixel in the feature map), or 2 (every other pixel).
 
     Returns:
-        rpn_logits: [batch, H, W, 2] Anchor classifier logits (before softmax)
-        rpn_probs: [batch, W, W, 2] Anchor classifier probabilities.
-        rpn_bbox: [batch, H, W, (dy, dx, log(dh), log(dw))] Deltas to be
+        rpn_logits: [batch, H*W*A, 2] Anchor classifier logits (before softmax)
+        rpn_probs: [batch, H*W*A, 2] Anchor classifier probabilities.
+        rpn_bbox: [batch, H*W*A, (dy, dx, log(dh), log(dw))] Deltas to be
                   applied to anchors.
+        * where H is the height, W is the width and A is number of anchors per location
     """
 
     def __init__(self, anchors_per_location, anchor_stride, depth):

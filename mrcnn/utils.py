@@ -879,3 +879,48 @@ class SamePad2d(nn.Module):
 
     def __repr__(self):
         return self.__class__.__name__
+
+
+class TensorContainer():
+    def to(self, device):
+        for key, value in self.__dict__.items():
+            self.__dict__[key] = value.to(device)
+        return self
+
+
+class RPNOutput(TensorContainer):
+    def __init__(self, class_logits, deltas):
+        self.class_logits = class_logits
+        self.deltas = deltas
+
+
+class RPNTarget(TensorContainer):
+    def __init__(self, match, deltas):
+        self.match = match
+        self.deltas = deltas
+
+
+class MRCNNOutput(TensorContainer):
+    def __init__(self, class_logits, deltas, masks):
+        self.class_logits = class_logits
+        self.deltas = deltas
+        self.masks = masks
+
+
+class MRCNNTarget():
+    def __init__(self, class_ids, deltas, masks):
+        self.class_ids = class_ids
+        self.deltas = deltas
+        self.masks = masks
+
+
+class MRCNNGroundTruth(TensorContainer):
+    def __init__(self, class_ids, boxes, masks):
+        self.class_ids = class_ids
+        self.boxes = boxes 
+        self.masks = masks
+
+
+def get_empty_mrcnn_out():
+    return MRCNNOutput(torch.FloatTensor(), torch.FloatTensor(),
+                       torch.FloatTensor())

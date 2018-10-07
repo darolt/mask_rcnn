@@ -106,4 +106,3 @@ def proposal_layer(inputs, proposal_count, nms_threshold, anchors,
     normalized_boxes = boxes / norm
 
     return normalized_boxes
-

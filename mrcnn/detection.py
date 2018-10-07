@@ -76,7 +76,7 @@ def detection_layer3(config, rois, probs, deltas, image_meta):
     return refined_rois, class_ids, class_scores
 
 
-def detection_layer(config, rois, probs, deltas, image_meta):
+def detection_layer(config, rois, probs, deltas, image_meta, scale):
     """Refine classified proposals and filter overlaps and return final
     detections.
 

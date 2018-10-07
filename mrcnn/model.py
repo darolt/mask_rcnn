@@ -19,233 +19,17 @@ import torch.optim as optim
 import torch.utils.data
 
 from mrcnn import utils
+from mrcnn.utils import MRCNNOutput, RPNOutput, RPNTarget,\
+                        MRCNNGroundTruth, get_empty_mrcnn_out
 from mrcnn.proposal import proposal_layer
 from mrcnn.detection import detection_layer
 from mrcnn.dataset import Dataset
-from mrcnn.losses import Losses, compute_losses, compute_iou_loss
+from mrcnn.losses import Losses, compute_losses
 from mrcnn import visualize
 from mrcnn.resnet import ResNet
 from mrcnn.rpn import RPN
 from mrcnn.fpn import FPN, Classifier, Mask
-from roialign.roi_align.crop_and_resize import CropAndResizeFunction
-
-
-############################################################
-#  Detection Target Layer
-############################################################
-
-
-def bbox_overlaps(boxes1, boxes2):
-    """Computes IoU overlaps between two sets of boxes.
-    boxes1, boxes2: [N, (y1, x1, y2, x2)].
-    """
-    # 1. Tile boxes2 and repeat boxes1. This allows us to compare
-    # every box1 against every box2 without loops.
-    boxes1_repeat = boxes2.size()[0]
-    boxes2_repeat = boxes1.size()[0]
-    boxes1 = boxes1.repeat(1, boxes1_repeat).view(-1, 4)
-    boxes2 = boxes2.repeat(boxes2_repeat, 1)
-
-    # 2. Compute intersections
-    b1_y1, b1_x1, b1_y2, b1_x2 = boxes1.chunk(4, dim=1)
-    b2_y1, b2_x1, b2_y2, b2_x2 = boxes2.chunk(4, dim=1)
-    y1 = torch.max(b1_y1, b2_y1)[:, 0]
-    x1 = torch.max(b1_x1, b2_x1)[:, 0]
-    y2 = torch.min(b1_y2, b2_y2)[:, 0]
-    x2 = torch.min(b1_x2, b2_x2)[:, 0]
-    zeros = torch.zeros(y1.size()[0], requires_grad=False, dtype=torch.float32,
-                        device=mrcnn.config.DEVICE)
-    intersection = torch.max(x2 - x1, zeros) * torch.max(y2 - y1, zeros)
-
-    # 3. Compute unions
-    b1_area = (b1_y2 - b1_y1) * (b1_x2 - b1_x1)
-    b2_area = (b2_y2 - b2_y1) * (b2_x2 - b2_x1)
-    union = b1_area[:, 0] + b2_area[:, 0] - intersection
-
-    # 4. Compute IoU and reshape to [boxes1, boxes2]
-    iou = intersection / union
-    nans = (iou != iou)
-    # TODO check if this impacts gradients
-    iou[nans] = -1
-    overlaps = iou.view(boxes2_repeat, boxes1_repeat)
-
-    return overlaps
-
-
-def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks,
-                           config):
-    """Subsamples proposals and generates target box refinement, class_ids,
-    and masks for each.
-
-    Inputs:
-    proposals: [batch, N, (y1, x1, y2, x2)] in normalized coordinates. Might
-               be zero padded if there are not enough proposals.
-    gt_class_ids: [batch, MAX_GT_INSTANCES] Integer class IDs.
-    gt_boxes: [batch, MAX_GT_INSTANCES, (y1, x1, y2, x2)] in normalized
-              coordinates.
-    gt_masks: [batch, height, width, MAX_GT_INSTANCES] of boolean type
-
-    Returns: Target ROIs and corresponding class IDs, bounding box shifts,
-    and masks.
-    rois: [batch, TRAIN_ROIS_PER_IMAGE, (y1, x1, y2, x2)] in normalized
-          coordinates
-    target_class_ids: [batch, TRAIN_ROIS_PER_IMAGE]. Integer class IDs.
-    target_deltas: [batch, TRAIN_ROIS_PER_IMAGE, NUM_CLASSES,
-                    (dy, dx, log(dh), log(dw), class_id)]
-                   Class-specific bbox refinments.
-    target_mask: [batch, TRAIN_ROIS_PER_IMAGE, height, width)
-                 Masks cropped to bbox boundaries and resized to neural
-                 network output size.
-    """
-    # Handle crowds
-    # A crowd box is a bounding box around several instances. Exclude
-    # them from training. A crowd box is given a negative class ID.
-    crowd_ix = torch.nonzero(gt_class_ids < 0)  # [:, 0]
-    if crowd_ix.nelement() != 0:
-        crowd_ix = crowd_ix[:, 0]
-        non_crowd_ix = torch.nonzero(gt_class_ids > 0)[:, 0]
-        crowd_boxes = gt_boxes[crowd_ix.detach(), :]
-        gt_class_ids = gt_class_ids[non_crowd_ix.detach()]
-        gt_boxes = gt_boxes[non_crowd_ix.detach(), :]
-        gt_masks = gt_masks[non_crowd_ix.detach(), :]
-
-        # Compute overlaps with crowd boxes [anchors, crowds]
-        crowd_overlaps = bbox_overlaps(proposals, crowd_boxes)
-        crowd_iou_max = torch.max(crowd_overlaps, dim=1)[0]
-        no_crowd_bool = crowd_iou_max < 0.001
-    else:
-        no_crowd_bool = torch.tensor(proposals.size()[0]*[True],
-                                     dtype=torch.uint8,
-                                     device=mrcnn.config.DEVICE,
-                                     requires_grad=False)
-
-    # Compute overlaps matrix [nb_batches, proposals, gt_boxes]
-    # print("Before...")
-    # print("Proposals: {}".format(proposals.size()))
-    # print("GT_boxes: {}".format(gt_boxes.size()))
-    overlaps = bbox_overlaps(proposals, gt_boxes)
-    # print("Overlaps {}".format(overlaps.size()))
-
-    # Determine positive and negative ROIs
-    roi_iou_max = torch.max(overlaps, dim=1)[0]
-    # print("ROI_IOU_max {}".format(roi_iou_max.size()))
-
-    # 1. Positive ROIs are those with >= 0.5 IoU with a GT box
-    positive_roi_bool = roi_iou_max >= 0.5
-
-    # Subsample ROIs. Aim for 33% positive
-    # Positive ROIs
-    # print("TRAIN_ROIS_PER_IMAGE: {}".format(config.TRAIN_ROIS_PER_IMAGE))
-    # print("ROI_POSITIVE_RATIO: {}".format(config.ROI_POSITIVE_RATIO))
-    if torch.nonzero(positive_roi_bool).nelement() != 0:
-        positive_indices = torch.nonzero(positive_roi_bool)[:, 0]
-
-        positive_count = int(config.TRAIN_ROIS_PER_IMAGE *
-                             config.ROI_POSITIVE_RATIO)
-        rand_idx = torch.randperm(positive_indices.size()[0])
-        rand_idx = rand_idx[:positive_count].to(mrcnn.config.DEVICE)
-        positive_indices = positive_indices[rand_idx]
-        positive_count = positive_indices.size()[0]
-        positive_rois = proposals[positive_indices.detach(), :]
-
-        # Assign positive ROIs to GT boxes.
-        positive_overlaps = overlaps[positive_indices.detach(), :]
-        roi_gt_box_assignment = torch.max(positive_overlaps, dim=1)[1]
-        roi_gt_boxes = gt_boxes[roi_gt_box_assignment.detach(), :]
-        roi_gt_class_ids = gt_class_ids[roi_gt_box_assignment.detach()]
-
-        # Compute bbox refinement for positive ROIs
-        deltas = utils.box_refinement(positive_rois.detach(),
-                                      roi_gt_boxes.detach())
-        std_dev = torch.from_numpy(config.BBOX_STD_DEV).float()
-        std_dev = std_dev.to(mrcnn.config.DEVICE)
-        deltas /= std_dev
-
-        # Assign positive ROIs to GT masks
-        roi_masks = gt_masks[roi_gt_box_assignment.detach(), :, :]
-
-        # Compute mask targets
-        boxes = positive_rois
-        if config.USE_MINI_MASK:
-            # Transform ROI corrdinates from normalized image space
-            # to normalized mini-mask space.
-            y1, x1, y2, x2 = positive_rois.chunk(4, dim=1)
-            gt_y1, gt_x1, gt_y2, gt_x2 = roi_gt_boxes.chunk(4, dim=1)
-            gt_h = gt_y2 - gt_y1
-            gt_w = gt_x2 - gt_x1
-            y1 = (y1 - gt_y1) / gt_h
-            x1 = (x1 - gt_x1) / gt_w
-            y2 = (y2 - gt_y1) / gt_h
-            x2 = (x2 - gt_x1) / gt_w
-            boxes = torch.cat([y1, x1, y2, x2], dim=1)
-        box_ids = (torch.arange(roi_masks.size()[0]).int()
-                   .to(mrcnn.config.DEVICE))
-        masks = CropAndResizeFunction(
-                    config.MASK_SHAPE[0],
-                    config.MASK_SHAPE[1],
-                    0)(roi_masks.unsqueeze(1), boxes, box_ids).detach()
-        masks = masks.squeeze(1)
-
-        # Threshold mask pixels at 0.5 to have GT masks be 0 or 1 to use with
-        # binary cross entropy loss.
-        masks = torch.round(masks)
-    else:
-        positive_count = 0
-    # print("positive_count {}".format(positive_count))
-
-    # 2. Negative ROIs are those with < 0.5 with every GT box. Skip crowds.
-    negative_roi_bool = roi_iou_max < 0.5
-    negative_roi_bool = negative_roi_bool & no_crowd_bool
-    # Negative ROIs. Add enough to maintain positive:negative ratio.
-    if torch.nonzero(negative_roi_bool).nelement() != 0 and positive_count > 0:
-        negative_indices = torch.nonzero(negative_roi_bool)[:, 0]
-        r = 1.0 / config.ROI_POSITIVE_RATIO
-        negative_count = int(r * positive_count - positive_count)
-        rand_idx = torch.randperm(negative_indices.size()[0])
-        rand_idx = rand_idx[:negative_count].to(mrcnn.config.DEVICE)
-        negative_indices = negative_indices[rand_idx]
-        negative_count = negative_indices.size()[0]
-        negative_rois = proposals[negative_indices.detach(), :]
-    else:
-        negative_count = 0
-    # print("negative_count {}".format(negative_count))
-
-    # Append negative ROIs and pad bbox deltas and masks that
-    # are not used for negative ROIs with zeros.
-    if positive_count > 0 and negative_count > 0:
-        rois = torch.cat((positive_rois, negative_rois), dim=0)
-        zeros = torch.zeros(negative_count, dtype=torch.int,
-                            device=mrcnn.config.DEVICE)
-        roi_gt_class_ids = torch.cat([roi_gt_class_ids, zeros], dim=0)
-        zeros = torch.zeros(negative_count, 4, dtype=torch.float32,
-                            device=mrcnn.config.DEVICE)
-        deltas = torch.cat([deltas, zeros], dim=0)
-        zeros = torch.zeros(negative_count, config.MASK_SHAPE[0],
-                            config.MASK_SHAPE[1], dtype=torch.float32,
-                            device=mrcnn.config.DEVICE)
-        masks = torch.cat([masks, zeros], dim=0)
-    elif positive_count > 0:
-        rois = positive_rois
-    elif negative_count > 0:
-        rois = negative_rois
-        roi_gt_class_ids = torch.zeros(negative_count,
-                                       device=mrcnn.config.DEVICE)
-        deltas = torch.zeros(negative_count, 4, dtype=torch.int,
-                             device=mrcnn.config.DEVICE)
-        masks = torch.zeros(negative_count, config.MASK_SHAPE[0],
-                            config.MASK_SHAPE[1], device=mrcnn.config.DEVICE)
-    else:
-        rois = torch.tensor([], dtype=torch.float32,
-                            device=mrcnn.config.DEVICE)
-        roi_gt_class_ids = torch.tensor([], dtype=torch.int,
-                                        device=mrcnn.config.DEVICE)
-        deltas = torch.tensor([], dtype=torch.float32,
-                              device=mrcnn.config.DEVICE)
-        masks = torch.tensor([], dtype=torch.float32,
-                             device=mrcnn.config.DEVICE)
-
-    # print("masks {}".format(masks.size()))
-    return rois, roi_gt_class_ids, deltas, masks
+from mrcnn.detection_target import detection_target_layer
 
 
 ############################################################
@@ -463,7 +247,7 @@ class MaskRCNN(nn.Module):
 
         # Run object detection
         with torch.no_grad():
-            detections, mrcnn_mask = self.predict([molded_images, image_metas],
+            detections, mrcnn_mask = self.predict(molded_images, image_metas,
                                                   mode='inference')
 
         mrcnn_mask = mrcnn_mask.permute(0, 1, 3, 4, 2)
@@ -482,9 +266,7 @@ class MaskRCNN(nn.Module):
             })
         return results
 
-    def predict(self, inputs, mode):
-        molded_images = inputs[0]
-        image_metas = inputs[1]
+    def predict(self, molded_images, image_metas, mode, gt=None):
 
         if mode == 'inference':
             self.eval()
@@ -517,7 +299,8 @@ class MaskRCNN(nn.Module):
         # e.g. [[a1, b1, c1], [a2, b2, c2]] => [[a1, a2], [b1, b2], [c1, c2]]
         outputs = list(zip(*layer_outputs))
         outputs = [torch.cat(list(o), dim=1) for o in outputs]
-        rpn_class_logits, rpn_class, rpn_bbox = outputs
+        rpn_class_logits, rpn_class, rpn_deltas = outputs
+        rpn_out = RPNOutput(rpn_class_logits, rpn_deltas)
 
         # Generate proposals
         # Proposals are [batch, N, (y1, x1, y2, x2)] in normalized coordinates
@@ -530,7 +313,7 @@ class MaskRCNN(nn.Module):
         anchors = (
             self.anchors if batch_size > 1 else self.anchors[0].unsqueeze(0)
         )
-        rpn_rois = proposal_layer([rpn_class, rpn_bbox],
+        rpn_rois = proposal_layer([rpn_class, rpn_deltas],
                                   proposal_count=proposal_count,
                                   nms_threshold=self.config.RPN_NMS_THRESHOLD,
                                   anchors=anchors,
@@ -544,19 +327,17 @@ class MaskRCNN(nn.Module):
             # Proposal classifier and BBox regressor heads
             mrcnn_feature_maps_batch = [x[0].unsqueeze(0)
                                         for x in mrcnn_feature_maps]
-            mrcnn_class_logits, mrcnn_class, mrcnn_bbox = \
+            mrcnn_class_logits, mrcnn_class, mrcnn_deltas = \
                 self.classifier(mrcnn_feature_maps_batch, rpn_rois[0])
 
             # Detections output is
             # [batch, num_detections, (y1, x1, y2, x2, class_id, score)]
             # in image coordinates
             detections = detection_layer(self.config, rpn_rois, mrcnn_class,
-                                         mrcnn_bbox, image_metas)
+                                         mrcnn_deltas, image_metas, scale)
 
-            # Convert boxes to normalized coordinates
             detection_boxes = detections[:, :4]/scale
             detection_boxes = detection_boxes.unsqueeze(0)
-
             # Create masks for detections
             mrcnn_mask = self.mask(mrcnn_feature_maps, detection_boxes)
 
@@ -567,33 +348,21 @@ class MaskRCNN(nn.Module):
             return [detections, mrcnn_mask]
 
         elif mode == 'training':
-            gt_class_ids = inputs[2]
-            gt_boxes = inputs[3]
-            gt_masks = inputs[4]
-
             # Normalize coordinates
-            gt_boxes = gt_boxes / scale
+            gt.boxes = gt.boxes / scale
 
             # Generate detection targets
             # Subsamples proposals and generates target outputs for training
             # Note that proposal class IDs, gt_boxes, and gt_masks are zero
             # padded. Equally, returned rois and targets are zero padded.
-            target_class_ids, target_deltas, target_mask = [], [], []
-            mrcnn_class_logits, mrcnn_bbox, mrcnn_mask = [], [], []
-            mrcnn_probs = []
-            rois = []
+            mrcnn_targets, mrcnn_outs = [], []
             for i in range(0, rpn_rois.size()[0]):
-                rois_, target_class_ids_, target_deltas_, target_mask_ = \
-                    detection_target_layer(rpn_rois[i], gt_class_ids[i],
-                                           gt_boxes[i], gt_masks[i],
-                                           self.config)
+                rois_, mrcnn_target = detection_target_layer(
+                    rpn_rois[i], gt.class_ids[i], gt.boxes[i], gt.masks[i],
+                    self.config)
 
                 if rois_.nelement() == 0:
-                    mrcnn_class_logits_ = torch.FloatTensor().to(mrcnn.config.DEVICE)
-                    mrcnn_bbox_ = torch.FloatTensor().to(mrcnn.config.DEVICE)
-                    mrcnn_mask_ = torch.FloatTensor().to(mrcnn.config.DEVICE)
-                    mrcnn_probs_ = torch.FloatTensor().to(mrcnn.config.DEVICE)
-                    # TODO how to solve this?
+                    mrcnn_out = get_empty_mrcnn_out().to(mrcnn.config.DEVICE)
                     print('Rois size is empty')
                 else:
                     # Network Heads
@@ -601,23 +370,17 @@ class MaskRCNN(nn.Module):
                     rois_ = rois_.unsqueeze(0)
                     mrcnn_feature_maps_batch = [x[i].unsqueeze(0)
                                                 for x in mrcnn_feature_maps]
-                    mrcnn_class_logits_, mrcnn_probs_, mrcnn_bbox_ = \
+                    mrcnn_class_logits_, _, mrcnn_deltas_ = \
                         self.classifier(mrcnn_feature_maps_batch, rois_)
 
                     # Create masks for detections
                     mrcnn_mask_ = self.mask(mrcnn_feature_maps_batch, rois_)
-                mrcnn_mask.append(mrcnn_mask_)
-                mrcnn_bbox.append(mrcnn_bbox_)
-                mrcnn_probs.append(mrcnn_probs_)
-                mrcnn_class_logits.append(mrcnn_class_logits_)
-                target_class_ids.append(target_class_ids_)
-                target_deltas.append(target_deltas_)
-                target_mask.append(target_mask_)
-                rois.append(rois_)
+                    mrcnn_out = MRCNNOutput(mrcnn_class_logits_,
+                                            mrcnn_deltas_, mrcnn_mask_)
+                mrcnn_outs.append(mrcnn_out)
+                mrcnn_targets.append(mrcnn_target)
 
-            return [rpn_class_logits, rpn_bbox, target_class_ids,
-                    mrcnn_class_logits, target_deltas, mrcnn_bbox,
-                    target_mask, mrcnn_mask, rois, mrcnn_probs]
+            return (rpn_out, mrcnn_targets, mrcnn_outs)
 
     def train_model(self, train_dataset, val_dataset, learning_rate, epochs,
                     layers, augmentation=None):
@@ -705,22 +468,15 @@ class MaskRCNN(nn.Module):
                 break
 
             # To GPU
-            images = inputs[0].to(mrcnn.config.DEVICE)
-            image_metas = inputs[1]
-            rpn_match = inputs[2].to(mrcnn.config.DEVICE)
-            rpn_bbox = inputs[3].to(mrcnn.config.DEVICE)
-            gt_class_ids = inputs[4].to(mrcnn.config.DEVICE)
-            gt_boxes = inputs[5].to(mrcnn.config.DEVICE)
-            gt_masks = inputs[6].to(mrcnn.config.DEVICE)
+            images, image_metas, rpn_target, gt = self.prepare_inputs(inputs)
 
             optimizer.zero_grad()
 
             # Run object detection
-            outputs = self.predict([images, image_metas, gt_class_ids,
-                                   gt_boxes, gt_masks], mode='training')
+            outputs = self.predict(images, image_metas, mode='training', gt=gt)
 
             # Compute losses
-            losses_epoch = compute_losses(rpn_match, rpn_bbox, *outputs[:-2])
+            losses_epoch = compute_losses(rpn_target, *outputs)
 
             # Backpropagation
             losses_epoch.total.backward()
@@ -744,26 +500,19 @@ class MaskRCNN(nn.Module):
                 break
 
             # To GPU
-            images = inputs[0].to(mrcnn.config.DEVICE)
-            image_metas = inputs[1]
-            rpn_match = inputs[2].to(mrcnn.config.DEVICE)
-            rpn_bbox = inputs[3].to(mrcnn.config.DEVICE)
-            gt_class_ids = inputs[4].to(mrcnn.config.DEVICE)
-            gt_boxes = inputs[5].to(mrcnn.config.DEVICE)
-            gt_masks = inputs[6].to(mrcnn.config.DEVICE)
+            images, image_metas, rpn_target, gt = self.prepare_inputs(inputs)
 
             # Run object detection
-            outputs = self.predict([images, image_metas, gt_class_ids,
-                                    gt_boxes, gt_masks], mode='training')
+            outputs = self.predict(images, image_metas, mode='training', gt=gt)
 
             try:
-                if outputs[2][0].nelement() == 0:
+                if outputs[1][0].class_ids.nelement() == 0:
                     continue
             except IndexError:
                 continue
 
             # Compute losses
-            losses_epoch = compute_losses(rpn_match, rpn_bbox, *outputs[:-2])
+            losses_epoch = compute_losses(rpn_target, *outputs)
 
             # Progress
             utils.printProgressBar(step + 1, steps, losses_epoch)
@@ -772,3 +521,13 @@ class MaskRCNN(nn.Module):
             losses_sum = losses_sum + losses_epoch/steps
 
         return losses_sum
+
+    def prepare_inputs(self, inputs):
+        images = inputs[0].to(mrcnn.config.DEVICE)
+        image_metas = inputs[1]
+        rpn_target = RPNTarget(inputs[2], inputs[3])
+        gt = MRCNNGroundTruth(inputs[4], inputs[5], inputs[6])
+        rpn_target.to(mrcnn.config.DEVICE)
+        gt.to(mrcnn.config.DEVICE)
+
+        return (images, image_metas, rpn_target, gt)
