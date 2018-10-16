@@ -3,6 +3,7 @@ import torch
 import numpy as np
 
 from mrcnn import utils
+from mrcnn import anchors
 
 ############################################################
 #  Data Generator
@@ -250,11 +251,11 @@ class Dataset(torch.utils.data.Dataset):
 
         # Anchors
         # [anchor_count, (y1, x1, y2, x2)]
-        self.anchors = utils.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
-                                                      config.RPN_ANCHOR_RATIOS,
-                                                      config.BACKBONE_SHAPES,
-                                                      config.BACKBONE_STRIDES,
-                                                      config.RPN_ANCHOR_STRIDE)
+        self.anchors = anchors.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
+                                                        config.RPN_ANCHOR_RATIOS,
+                                                        config.BACKBONE_SHAPES,
+                                                        config.BACKBONE_STRIDES,
+                                                        config.RPN_ANCHOR_STRIDE)
         self.anchors = torch.from_numpy(self.anchors)
 
     def __getitem__(self, image_index):

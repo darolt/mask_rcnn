@@ -5,7 +5,6 @@ import torch.nn.functional as F
 import mrcnn.config
 
 from mrcnn import utils
-from mrcnn.detection import detection_layer2
 
 
 class Losses():
@@ -188,6 +187,26 @@ def compute_mrcnn_mask_loss(target_masks, target_class_ids, pred_masks):
     return loss
 
 
+def compute_ious2(gt, rois, mrcnn_masks, i):
+    # compute IOUs
+    gt_masks = gt.masks[i].to(torch.uint8)
+    pred_masks = mrcnn_masks.to(torch.uint8)
+    print(f"gt_masks  {gt_masks.shape}")
+    print(f"pred_masks {pred_masks.shape}")
+    ious = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
+                       dtype=torch.float)
+    print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
+    for gt_idx in range(0, gt_masks.shape[2]):
+        for pred_idx in range(0, pred_masks.shape[2]):
+            intersection = pred_masks[:, :, pred_idx] & gt_masks[:, :, gt_idx]
+            intersection = torch.nonzero(intersection).shape[0]
+            union = pred_masks[:, :, pred_idx] | gt_masks[:, :, gt_idx]
+            union = torch.nonzero(union).shape[0]
+            iou = intersection/union if union != 0.0 else 0.0
+            ious[gt_idx, pred_idx] = iou
+    return ious
+
+
 def compute_iou_loss2(gt_masks, pred_masks):
     ious = compute_ious(gt_masks, pred_masks)
 
@@ -195,25 +214,10 @@ def compute_iou_loss2(gt_masks, pred_masks):
 
 
 def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
-                     predictions, config, detections=None, mrcnn_masks=None):
+                     config, detections, mrcnn_masks):
     """Compute loss for single image according to:
        https://www.kaggle.com/c/data-science-bowl-2018#evaluation
     """
-    if not detections:
-        mrcnn_masks = predictions[7][0]
-        mrcnn_boxes = predictions[5][0]
-        mrcnn_class_logits = predictions[3][0]
-        mrcnn_probs = predictions[9][0]
-        rois = predictions[8][0]
-        print(f"mrcnn_masks {mrcnn_masks.shape}")  # X, 28, 28
-
-        if mrcnn_class_logits.nelement() == 0:
-            print("no predictions")
-            return
-
-        detections = detection_layer2(config, rois, mrcnn_probs, mrcnn_boxes,
-                                      image_metas.unsqueeze(0))
-
     # remove zeros (padding)
     image_shape = np.array(image_metas[1:4])
     window = np.array(image_metas[4:8])
@@ -222,31 +226,128 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
 
     # 1 - unmold gt and mrcnn masks
     mrcnn_masks = mrcnn_masks.permute(0, 2, 3, 1)
-    final_masks = utils.unmold_detections(detections, mrcnn_masks,
-                                          image_shape[:2], window)[3]
+    pred_boxes, pred_masks = utils.unmold_detections_x(detections, mrcnn_masks,
+                                                       image_shape[:2], window)
 
-    gt_masks = gt_masks[:N].detach()
-    gt_boxes = gt_boxes[:N].detach()
-    print(f"gt_masks {gt_masks.shape}")
-    print(f"gt_boxes {gt_boxes.shape}")
+    # ground truth does not require grad computation
+    with torch.no_grad():
+        gt_masks = gt_masks[:N].detach()
+        gt_boxes = gt_boxes[:N].detach()
+        gt_boxes, gt_masks = utils.unmold_boxes_x(gt_boxes, gt_class_ids, gt_masks,
+                                                  image_shape[:2], window)
 
-    full_gt_masks = utils.unmold_boxes(gt_boxes, gt_class_ids, gt_masks,
-                                       image_shape[:2], window)[3]
+    ious = compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks)
 
-    ious = compute_ious(full_gt_masks, final_masks)
-
-    precision = compute_mAP(ious)
-    print(f"precision: {precision}")
+    precision = compute_mAP_x(ious)
 
     return precision
+
+
+def overlap_idx(box1_x1, box1_x2, box2_x1, box2_x2):
+    inter1_x = torch.zeros((2))
+    inter2_x = torch.zeros((2))
+
+    if (box2_x1 <= box1_x1 <= box2_x2):
+        inter1_x[0] = 0.0
+        inter2_x[0] = box1_x1 - box2_x1
+    if (box2_x1 <= box1_x2 <= box2_x2):
+        inter1_x[1] = box1_x2 - box1_x1
+        inter2_x[1] = box1_x2 - box2_x1
+    if (box1_x1 <= box2_x1 <= box1_x2):
+        inter1_x[0] = box2_x1 - box1_x1
+        inter2_x[0] = 0.0
+    if (box1_x1 <= box2_x2 <= box1_x2):
+        inter1_x[1] = box2_x2 - box1_x1
+        inter2_x[1] = box2_x2 - box2_x1
+
+    return (inter1_x, inter2_x)
+
+
+def get_intersection_idx(box1, box2):
+    box1_y1, box1_x1, box1_y2, box1_x2 = box1
+    box2_y1, box2_x1, box2_y2, box2_x2 = box2
+    intersections_idx_x = overlap_idx(box1_x1, box1_x2, box2_x1, box2_x2)
+    intersections_idx_y = overlap_idx(box1_y1, box1_y2, box2_y1, box2_y2)
+    # concat
+    intersection1_idx = torch.cat((intersections_idx_y[0],
+                                   intersections_idx_x[0]))
+    intersection1_idx = intersection1_idx[[0, 2, 1, 3]]
+    intersection2_idx = torch.cat((intersections_idx_y[1],
+                                   intersections_idx_x[1]))
+    intersection2_idx = intersection2_idx[[0, 2, 1, 3]]
+    return (intersection1_idx, intersection2_idx)
+
+
+def compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks):
+    # compute IOUs
+    ious = torch.zeros((len(gt_masks), len(pred_masks)),
+                       dtype=torch.float)
+    print(f"{len(gt_masks)} x {len(pred_masks)}")
+    # print(f"{gt_boxes.shape} x {pred_boxes.shape}")
+    # print(f"{pred_masks[0].requires_grad} {gt_masks[0].requires_grad}")
+    # print(f"{pred_boxes.requires_grad} {gt_boxes.requires_grad}")
+    for gt_idx in range(0, len(gt_masks)):
+        for pred_idx in range(0, len(pred_masks)):
+            inter_idx = get_intersection_idx(pred_boxes[pred_idx],
+                                             gt_boxes[gt_idx])
+            pred_inter_idx, gt_inter_idx = inter_idx
+            if ((pred_inter_idx[0] == 0 and pred_inter_idx[2] == 0) or
+                (pred_inter_idx[1] == 0 and pred_inter_idx[3] == 0) or
+                (gt_inter_idx[0] == 0 and gt_inter_idx[2] == 0) or
+                (gt_inter_idx[1] == 0 and gt_inter_idx[3] == 0)):
+                ious[gt_idx, pred_idx] = 0.0
+            else:
+                pred_mask = pred_masks[pred_idx]
+                gt_mask = gt_masks[gt_idx]
+                pred_y1, pred_x1, pred_y2, pred_x2 = torch.round(pred_inter_idx).to(torch.int32)
+                gt_y1, gt_x1, gt_y2, gt_x2 = torch.round(gt_inter_idx).to(torch.int32)
+                print(f"{pred_inter_idx}")
+                print(f"{gt_inter_idx}")
+                proj_pred_gt = torch.zeros_like(pred_mask)
+                print(f"{proj_pred_gt.shape} {gt_mask.shape} {pred_mask.shape}")
+                delta_x = pred_x2 - pred_x1
+                delta_y = pred_y2 - pred_y1
+                print(f"{pred_x1} {pred_y1} {gt_x1} {gt_y1} {delta_x} {delta_y}")
+                if pred_y1 + delta_y > proj_pred_gt.shape[0]:
+                    delta_y = proj_pred_gt.shape[0] - pred_y1
+                if gt_y1 + delta_y > gt_mask.shape[0]:
+                    delta_y = gt_mask.shape[0] - gt_y1
+                if pred_x1 + delta_x > proj_pred_gt.shape[1]:
+                    delta_x = proj_pred_gt.shape[1] - pred_x1
+                if gt_x1 + delta_x > gt_mask.shape[1]:
+                    delta_x = gt_mask.shape[1] - gt_x1
+                #if ((pred_y1 + delta_y >= proj_pred_gt.shape[0]) or
+                #    (gt_y1 + delta_y >= gt_mask.shape[0])):
+                #    delta_y -= 1
+                #if ((pred_x1 + delta_x >= proj_pred_gt.shape[1]) or
+                #    (gt_x1 + delta_x >= gt_mask.shape[1])):
+                #    delta_x -= 1
+                if delta_y == 0:
+                    delta_y = 1
+                if delta_x == 0:
+                    delta_x = 1
+                print(f"{pred_x1} {pred_y1} {gt_x1} {gt_y1} {delta_x} {delta_y}")
+                # TODO fix rounding problem
+                proj_pred_gt[pred_y1:pred_y1+delta_y, pred_x1:pred_x1+delta_x] = \
+                    gt_mask[gt_y1:gt_y1+delta_y, gt_x1:gt_x1+delta_x]
+                inter = proj_pred_gt*pred_mask
+                print(f"inter {inter.shape} {inter.requires_grad}")
+                intersection = inter.sum()
+                pred_area = pred_mask.sum()
+                gt_area = gt_mask.sum()
+                union = pred_area + gt_area - intersection
+                iou = intersection/union
+                ious[gt_idx, pred_idx] = iou
+                # print(iou.requires_grad)
+
+    # print(f"ious {ious.requires_grad}")
+    return ious
 
 
 def compute_ious(gt_masks, pred_masks):
     # compute IOUs
     gt_masks = gt_masks.to(torch.uint8)
     pred_masks = pred_masks.to(torch.uint8)
-    print(f"gt_masks  {gt_masks.shape}")
-    print(f"pred_masks {pred_masks.shape}")
     ious = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
                        dtype=torch.float)
     print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
@@ -271,6 +372,22 @@ def compute_mAP(ious):
         tp = torch.nonzero(hits.sum(dim=0)).shape[0]
         fp = torch.nonzero(hits.sum(dim=1) == 0).shape[0]
         fn = torch.nonzero(hits.sum(dim=0) == 0).shape[0]
+        precisions[thresh_idx] = tp/(tp + fp + fn)
+
+    # average precisions
+    return precisions.mean()
+
+
+def compute_mAP_x(ious):
+    """Compute mean average precision."""
+    # compute hits
+    thresholds = torch.arange(0.5, 1.0, 0.05)
+    precisions = torch.empty_like(thresholds, device=mrcnn.config.DEVICE)
+    for thresh_idx, threshold in enumerate(thresholds):
+        hits = torch.round(0.5 + ious - threshold)
+        tp = (hits.sum(dim=0)*100.0).sigmoid().sum()
+        fp = ((1 - hits.sum(dim=1))*100.0).sigmoid().sum()
+        fn = ((1 - hits.sum(dim=0))*100.0).sigmoid().sum()
         precisions[thresh_idx] = tp/(tp + fp + fn)
 
     # average precisions

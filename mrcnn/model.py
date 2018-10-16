@@ -19,12 +19,13 @@ import torch.optim as optim
 import torch.utils.data
 
 from mrcnn import utils
+from mrcnn.anchors import generate_pyramid_anchors
 from mrcnn.utils import MRCNNOutput, RPNOutput, RPNTarget,\
                         MRCNNGroundTruth, get_empty_mrcnn_out
 from mrcnn.proposal import proposal_layer
-from mrcnn.detection import detection_layer
+from mrcnn.detection import detection_layer, detection_layer2
 from mrcnn.dataset import Dataset
-from mrcnn.losses import Losses, compute_losses
+from mrcnn.losses import Losses, compute_losses, compute_iou_loss
 from mrcnn import visualize
 from mrcnn.resnet import ResNet
 from mrcnn.rpn import RPN
@@ -77,17 +78,17 @@ class MaskRCNN(nn.Module):
         C1, C2, C3, C4, C5 = resnet.stages()
 
         # Top-down Layers
-        # TODO: add assert to varify feature map sizes match what's in config
+        # TODO: add assert to verify feature map sizes match what's in config
         self.fpn = FPN(C1, C2, C3, C4, C5, out_channels=256).float()
         self.fpn.to(mrcnn.config.DEVICE)
 
         # Generate Anchors
-        anchors = utils.generate_pyramid_anchors(
-                            config.RPN_ANCHOR_SCALES,
-                            config.RPN_ANCHOR_RATIOS,
-                            config.BACKBONE_SHAPES,
-                            config.BACKBONE_STRIDES,
-                            config.RPN_ANCHOR_STRIDE)
+        anchors = generate_pyramid_anchors(
+                    config.RPN_ANCHOR_SCALES,
+                    config.RPN_ANCHOR_RATIOS,
+                    config.BACKBONE_SHAPES,
+                    config.BACKBONE_STRIDES,
+                    config.RPN_ANCHOR_STRIDE)
         anchors = np.broadcast_to(anchors, (2,) + anchors.shape)
         self.anchors = torch.from_numpy(anchors).float()
         self.anchors = self.anchors.to(mrcnn.config.DEVICE)
@@ -236,11 +237,11 @@ class MaskRCNN(nn.Module):
         """
 
         # Mold inputs to format expected by the neural network
-        molded_images, image_metas, windows = utils.mold_inputs(images, self.config)
+        molded_images, image_metas, windows = utils.mold_inputs(images,
+                                                                self.config)
 
         # Convert images to torch tensor
-        molded_images = (torch.from_numpy(molded_images.transpose(0, 3, 1, 2))
-                              .float())
+        molded_images = torch.from_numpy(molded_images.transpose(0, 3, 1, 2))
 
         # To GPU
         molded_images = molded_images.to(mrcnn.config.DEVICE)
@@ -266,7 +267,16 @@ class MaskRCNN(nn.Module):
             })
         return results
 
+    @staticmethod
+    def set_bn_eval(m):
+        classname = m.__class__.__name__
+        if classname.find('BatchNorm') != -1:
+            m.eval()
+
     def predict(self, molded_images, image_metas, mode, gt=None):
+
+        if mode not in ['inference', 'training']:
+            raise ValueError(f"mode {mode} not accepted.")
 
         if mode == 'inference':
             self.eval()
@@ -274,12 +284,7 @@ class MaskRCNN(nn.Module):
             self.train()
 
         # Set batchnorm always in eval mode during training
-        def set_bn_eval(m):
-            classname = m.__class__.__name__
-            if classname.find('BatchNorm') != -1:
-                m.eval()
-
-        self.apply(set_bn_eval)
+        self.apply(self.set_bn_eval)
 
         # Feature extraction
         [p2_out, p3_out, p4_out, p5_out, p6_out] = self.fpn(molded_images)
@@ -306,9 +311,9 @@ class MaskRCNN(nn.Module):
         # Proposals are [batch, N, (y1, x1, y2, x2)] in normalized coordinates
         # and zero padded.
         proposal_count = (
-            self.config.POST_NMS_ROIS_TRAINING
-            if mode == "training"
+            self.config.POST_NMS_ROIS_TRAINING if mode == "training"
             else self.config.POST_NMS_ROIS_INFERENCE)
+
         batch_size = rpn_class.size()[0]
         anchors = (
             self.anchors if batch_size > 1 else self.anchors[0].unsqueeze(0)
@@ -334,7 +339,7 @@ class MaskRCNN(nn.Module):
             # [batch, num_detections, (y1, x1, y2, x2, class_id, score)]
             # in image coordinates
             detections = detection_layer(self.config, rpn_rois, mrcnn_class,
-                                         mrcnn_deltas, image_metas, scale)
+                                         mrcnn_deltas, image_metas)
 
             detection_boxes = detections[:, :4]/scale
             detection_boxes = detection_boxes.unsqueeze(0)
@@ -345,17 +350,19 @@ class MaskRCNN(nn.Module):
             detections = detections.unsqueeze(0)
             mrcnn_mask = mrcnn_mask.unsqueeze(0)
 
-            return [detections, mrcnn_mask]
+            return (detections, mrcnn_mask)
 
         elif mode == 'training':
             # Normalize coordinates
+            gt_boxes = gt.boxes
             gt.boxes = gt.boxes / scale
 
             # Generate detection targets
             # Subsamples proposals and generates target outputs for training
             # Note that proposal class IDs, gt_boxes, and gt_masks are zero
             # padded. Equally, returned rois and targets are zero padded.
-            mrcnn_targets, mrcnn_outs = [], []
+            mrcnn_targets, mrcnn_outs, rois = [], [], []
+            precisions = torch.zeros((rpn_rois.size()[0]), dtype=torch.float)
             for i in range(0, rpn_rois.size()[0]):
                 rois_, mrcnn_target = detection_target_layer(
                     rpn_rois[i], gt.class_ids[i], gt.boxes[i], gt.masks[i],
@@ -363,24 +370,51 @@ class MaskRCNN(nn.Module):
 
                 if rois_.nelement() == 0:
                     mrcnn_out = get_empty_mrcnn_out().to(mrcnn.config.DEVICE)
+                    mrcnn_class = torch.FloatTensor().to(mrcnn.config.DEVICE)
                     print('Rois size is empty')
                 else:
+                    print('Not empty')
                     # Network Heads
                     # Proposal classifier and BBox regressor heads
                     rois_ = rois_.unsqueeze(0)
                     mrcnn_feature_maps_batch = [x[i].unsqueeze(0)
                                                 for x in mrcnn_feature_maps]
-                    mrcnn_class_logits_, _, mrcnn_deltas_ = \
+                    mrcnn_class_logits_, mrcnn_class, mrcnn_deltas_ = \
                         self.classifier(mrcnn_feature_maps_batch, rois_)
 
                     # Create masks for detections
                     mrcnn_mask_ = self.mask(mrcnn_feature_maps_batch, rois_)
                     mrcnn_out = MRCNNOutput(mrcnn_class_logits_,
                                             mrcnn_deltas_, mrcnn_mask_)
+
                 mrcnn_outs.append(mrcnn_out)
                 mrcnn_targets.append(mrcnn_target)
 
-            return (rpn_out, mrcnn_targets, mrcnn_outs)
+                print(f"grad: {mrcnn_out.deltas.requires_grad}")
+                print(f"grad: {mrcnn_class.requires_grad}")
+                print(f"grad: {rois_.requires_grad}")
+                # prepare mrcnn_out to mAP
+                if mrcnn_class.nelement() != 0:
+                    detections = detection_layer2(self.config, rois_,
+                                                  mrcnn_class, mrcnn_out.deltas,
+                                                  image_metas)
+                    print(f"det grad {detections.requires_grad}")
+                    # use gt for mAP
+                    # call mAP (move to loss)
+                    try:
+                        print(f"mrcnn_mask_ {mrcnn_mask_.requires_grad}")
+                        precision = compute_iou_loss(gt.masks[i], gt_boxes[i],
+                                                     gt.class_ids[i],
+                                                     image_metas[i], self.config,
+                                                     detections,
+                                                     mrcnn_mask_)
+                        print(f"precision {precision.requires_grad}")
+                        print(f"precision is {precision}")
+                        precisions[i] = precision
+                    except utils.NonPositiveAreaError as e:
+                        print(str(e))
+
+            return (rpn_out, mrcnn_targets, mrcnn_outs, precisions.mean())
 
     def train_model(self, train_dataset, val_dataset, learning_rate, epochs,
                     layers, augmentation=None):
@@ -476,10 +510,15 @@ class MaskRCNN(nn.Module):
             outputs = self.predict(images, image_metas, mode='training', gt=gt)
 
             # Compute losses
-            losses_epoch = compute_losses(rpn_target, *outputs)
+            losses_epoch = compute_losses(rpn_target, *outputs[:-1])
 
             # Backpropagation
-            losses_epoch.total.backward()
+            #losses_epoch.total.backward()
+            if outputs[2][0].deltas.nelement() == 0 or outputs[2][1].deltas.nelement() == 0:
+                losses_epoch.total.backward()
+            else:
+                print('optimizing mAP')
+                outputs[-1].backward()
             torch.nn.utils.clip_grad_norm_(self.parameters(), 5.0)
             optimizer.step()
 

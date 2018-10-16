@@ -61,7 +61,7 @@ def detection_layer3(config, rois, probs, deltas, image_meta):
                                     (deltas_specific * std_dev).unsqueeze(0))
     refined_rois = refined_rois.squeeze(0)
 
-    # Convert coordiates to image domain
+    # Convert coordinates to image domain
     height, width = config.IMAGE_SHAPE[:2]
     scale = torch.from_numpy(np.array([height, width, height, width])).float()
     scale = scale.to(mrcnn.config.DEVICE)
@@ -76,7 +76,7 @@ def detection_layer3(config, rois, probs, deltas, image_meta):
     return refined_rois, class_ids, class_scores
 
 
-def detection_layer(config, rois, probs, deltas, image_meta, scale):
+def detection_layer(config, rois, probs, deltas, image_meta):
     """Refine classified proposals and filter overlaps and return final
     detections.
 
@@ -100,8 +100,7 @@ def detection_layer(config, rois, probs, deltas, image_meta, scale):
 
     # Filter out low confidence boxes
     if config.DETECTION_MIN_CONFIDENCE:
-        keep_bool = (keep_bool
-                     & (class_scores >= config.DETECTION_MIN_CONFIDENCE))
+        keep_bool &= (class_scores >= config.DETECTION_MIN_CONFIDENCE)
     keep = torch.nonzero(keep_bool)[:, 0]
 
     # Apply per-class NMS

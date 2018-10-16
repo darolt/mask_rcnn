@@ -263,4 +263,3 @@ class Mask(nn.Module):
         x = self.sigmoid(x)
 
         return x
-
