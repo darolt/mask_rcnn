@@ -1,6 +1,7 @@
 import torch
 from ._ext import nms
-import numpy as np
+import mrcnn.config
+
 
 def pth_nms(dets, thresh):
   """
@@ -30,7 +31,7 @@ def pth_nms(dets, thresh):
     scores = dets[:, 4]
 
     dets_temp = torch.zeros(dets.size(), dtype=torch.float32,
-                            device='cuda:0')
+                            device=mrcnn.config.DEVICE)
     dets_temp[:, 0] = dets[:, 1]
     dets_temp[:, 1] = dets[:, 0]
     dets_temp[:, 2] = dets[:, 3]

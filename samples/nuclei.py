@@ -432,19 +432,28 @@ if __name__ == '__main__':
                         default=DEFAULT_LOGS_DIR,
                         metavar="/path/to/logs/",
                         help='Logs and checkpoints directory (default=logs/)')
+    parser.add_argument('--debug', required=False,
+                        help='Turn on debugger.')
     args = parser.parse_args()
 
     print("Command: ", args.command)
     print("Model: ", args.model)
     print("Dataset: ", args.dataset)
     print("Logs: ", args.logs)
+    print(f"Debug: {args.debug}")
+
+    if args.debug:
+        import sys
+        from mrcnn.gpu_profile import gpu_profile
+        os.environ['GPU_DEBUG'] = '1'
+        sys.settrace(gpu_profile)
 
     # Configurations
     if args.command == "train":
         config = NucleusConfig()
     else:
         config = InferenceConfig()
-    mrcnn.config.DEVICE = torch.device('cuda' if config.GPU_COUNT else 'cpu')
+    mrcnn.config.DEVICE = torch.device('cuda:1' if config.GPU_COUNT else 'cpu')
     config.display()
 
     # Create model
@@ -480,11 +489,14 @@ if __name__ == '__main__':
         model.load_weights(model_path, exclude=EXCLUDE)
     else:
         model.load_weights(model_path)
-    model.to(mrcnn.config.DEVICE)
+
+    with torch.cuda.device(1):
+        model.to(mrcnn.config.DEVICE)
     # print(model)
 
     if args.command == "train":
-        train(model, args.dataset, 'train')
+        with torch.cuda.device(1):
+            train(model, args.dataset, 'train')
     elif args.command == "detect":
         detect(model, args.dataset, 'val')
     elif args.command == "metric":

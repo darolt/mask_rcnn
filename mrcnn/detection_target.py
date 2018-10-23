@@ -155,6 +155,10 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks,
             boxes = torch.cat([y1, x1, y2, x2], dim=1)
         box_ids = (torch.arange(roi_masks.size()[0]).int()
                    .to(mrcnn.config.DEVICE))
+        print(box_ids)
+        print(boxes)
+        print(roi_masks)
+        print(roi_masks.is_cuda)
         masks = CropAndResizeFunction(
                     config.MASK_SHAPE[0],
                     config.MASK_SHAPE[1],

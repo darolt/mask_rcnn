@@ -292,7 +292,6 @@ def unmold_detections_x(detections, mrcnn_mask, image_shape, window):
     scores = detections[:N, 5]
     masks = mrcnn_mask[torch.arange(N, dtype=torch.long), :, :, class_ids]
 
-    print(f"masks222 {masks.requires_grad}")
     return unmold_boxes_x(boxes, class_ids, masks, image_shape, window, scores)
 
 
@@ -350,14 +349,14 @@ def unmold_boxes_x(boxes, class_ids, masks, image_shape, window, scores=None):
     class_ids = class_ids.to(torch.long)
 
     image_shape2 = (image_shape[0], image_shape[1])
-    boxes = to_img_domain(boxes, window, image_shape)
+    boxes = to_img_domain(boxes, window, image_shape).floor()
 
     boxes, class_ids, masks, scores = remove_zero_area(boxes, class_ids,
                                                        masks, scores)
 
     full_masks = unmold_masks_x(masks, boxes, image_shape2)
 
-    return torch.round(boxes), full_masks
+    return boxes, full_masks
 
 ############################################################
 #  Dataset
@@ -738,8 +737,8 @@ def unmold_mask(mask, bbox, image_shape):
                       mode='bilinear', align_corners=True)
     mask = mask.squeeze(0).squeeze(0)
     mask = torch.where(mask >= threshold,
-                       torch.tensor(1, device=torch.device('cuda')),
-                       torch.tensor(0, device=torch.device('cuda'))).to(torch.uint8)
+                       torch.tensor(1, device=mrcnn.config.DEVICE),
+                       torch.tensor(0, device=mrcnn.config.DEVICE)).to(torch.uint8)
 
     # Put the mask in the right location.
     full_mask = torch.zeros(image_shape[:2], dtype=torch.uint8)

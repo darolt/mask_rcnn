@@ -287,9 +287,11 @@ def compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks):
     # print(f"{pred_masks[0].requires_grad} {gt_masks[0].requires_grad}")
     # print(f"{pred_boxes.requires_grad} {gt_boxes.requires_grad}")
     for gt_idx in range(0, len(gt_masks)):
+        gt_box = gt_boxes[gt_idx]
         for pred_idx in range(0, len(pred_masks)):
-            inter_idx = get_intersection_idx(pred_boxes[pred_idx],
-                                             gt_boxes[gt_idx])
+            pred_box = pred_boxes[pred_idx]
+            inter_idx = get_intersection_idx(pred_box,
+                                             gt_box)
             pred_inter_idx, gt_inter_idx = inter_idx
             if ((pred_inter_idx[0] == 0 and pred_inter_idx[2] == 0) or
                 (pred_inter_idx[1] == 0 and pred_inter_idx[3] == 0) or
@@ -299,39 +301,21 @@ def compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks):
             else:
                 pred_mask = pred_masks[pred_idx]
                 gt_mask = gt_masks[gt_idx]
-                pred_y1, pred_x1, pred_y2, pred_x2 = torch.round(pred_inter_idx).to(torch.int32)
-                gt_y1, gt_x1, gt_y2, gt_x2 = torch.round(gt_inter_idx).to(torch.int32)
-                print(f"{pred_inter_idx}")
-                print(f"{gt_inter_idx}")
+                pred_y1, pred_x1, pred_y2, pred_x2 = pred_inter_idx.to(torch.int32)
+                gt_y1, gt_x1, gt_y2, gt_x2 = gt_inter_idx.to(torch.int32)
+                # print(f"boxes {pred_box}")
+                # print(f"boxes {gt_box}")
+                # print(f"idxs {pred_inter_idx}")
+                # print(f"idxs {gt_inter_idx}")
                 proj_pred_gt = torch.zeros_like(pred_mask)
-                print(f"{proj_pred_gt.shape} {gt_mask.shape} {pred_mask.shape}")
+                # print(f"{proj_pred_gt.shape} {gt_mask.shape} {pred_mask.shape}")
                 delta_x = pred_x2 - pred_x1
                 delta_y = pred_y2 - pred_y1
-                print(f"{pred_x1} {pred_y1} {gt_x1} {gt_y1} {delta_x} {delta_y}")
-                if pred_y1 + delta_y > proj_pred_gt.shape[0]:
-                    delta_y = proj_pred_gt.shape[0] - pred_y1
-                if gt_y1 + delta_y > gt_mask.shape[0]:
-                    delta_y = gt_mask.shape[0] - gt_y1
-                if pred_x1 + delta_x > proj_pred_gt.shape[1]:
-                    delta_x = proj_pred_gt.shape[1] - pred_x1
-                if gt_x1 + delta_x > gt_mask.shape[1]:
-                    delta_x = gt_mask.shape[1] - gt_x1
-                #if ((pred_y1 + delta_y >= proj_pred_gt.shape[0]) or
-                #    (gt_y1 + delta_y >= gt_mask.shape[0])):
-                #    delta_y -= 1
-                #if ((pred_x1 + delta_x >= proj_pred_gt.shape[1]) or
-                #    (gt_x1 + delta_x >= gt_mask.shape[1])):
-                #    delta_x -= 1
-                if delta_y == 0:
-                    delta_y = 1
-                if delta_x == 0:
-                    delta_x = 1
-                print(f"{pred_x1} {pred_y1} {gt_x1} {gt_y1} {delta_x} {delta_y}")
-                # TODO fix rounding problem
+
                 proj_pred_gt[pred_y1:pred_y1+delta_y, pred_x1:pred_x1+delta_x] = \
                     gt_mask[gt_y1:gt_y1+delta_y, gt_x1:gt_x1+delta_x]
                 inter = proj_pred_gt*pred_mask
-                print(f"inter {inter.shape} {inter.requires_grad}")
+                # print(f"inter {inter.shape} {inter.requires_grad}")
                 intersection = inter.sum()
                 pred_area = pred_mask.sum()
                 gt_area = gt_mask.sum()
@@ -350,7 +334,7 @@ def compute_ious(gt_masks, pred_masks):
     pred_masks = pred_masks.to(torch.uint8)
     ious = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
                        dtype=torch.float)
-    print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
+    # print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
     for gt_idx in range(0, gt_masks.shape[2]):
         for pred_idx in range(0, pred_masks.shape[2]):
             intersection = pred_masks[:, :, pred_idx] & gt_masks[:, :, gt_idx]

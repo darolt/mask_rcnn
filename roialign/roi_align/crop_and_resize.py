@@ -1,7 +1,5 @@
-import math
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from torch.autograd import Function
 
 from ._ext import crop_and_resize as _backend
@@ -19,12 +17,12 @@ class CropAndResizeFunction(Function):
 
         if image.is_cuda:
             _backend.crop_and_resize_gpu_forward(
-                image, boxes, box_ind,
-                self.extrapolation_value, self.crop_height, self.crop_width, crops)
+                image, boxes, box_ind, self.extrapolation_value,
+                self.crop_height, self.crop_width, crops)
         else:
             _backend.crop_and_resize_forward(
-                image, boxes, box_ind,
-                self.extrapolation_value, self.crop_height, self.crop_width, crops)
+                image, boxes, box_ind, self.extrapolation_value,
+                self.crop_height, self.crop_width, crops)
 
         # save for backward
         self.im_size = image.size()
@@ -64,4 +62,6 @@ class CropAndResize(nn.Module):
         self.extrapolation_value = extrapolation_value
 
     def forward(self, image, boxes, box_ind):
-        return CropAndResizeFunction(self.crop_height, self.crop_width, self.extrapolation_value)(image, boxes, box_ind)
+        return CropAndResizeFunction(
+            self.crop_height, self.crop_width,
+            self.extrapolation_value)(image, boxes, box_ind)

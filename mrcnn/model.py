@@ -10,6 +10,9 @@ Written by Waleed Abdulla
 import datetime
 import os
 import re
+import gc
+import sys
+import psutil
 
 import numpy as np
 import mrcnn.config
@@ -31,7 +34,23 @@ from mrcnn.resnet import ResNet
 from mrcnn.rpn import RPN
 from mrcnn.fpn import FPN, Classifier, Mask
 from mrcnn.detection_target import detection_target_layer
+from mrcnn.gpu_profile import gpu_profile
 
+
+def memReport():
+    for obj in gc.get_objects():
+        if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
+            print(type(obj), obj.size())
+
+
+def cpuStats():
+        print(sys.version)
+        print(psutil.cpu_percent())
+        print(psutil.virtual_memory())  # physical memory usage
+        pid = os.getpid()
+        py = psutil.Process(pid)
+        memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
+        print('memory GB:', memoryUse)
 
 ############################################################
 #  MaskRCNN Class
@@ -390,25 +409,25 @@ class MaskRCNN(nn.Module):
                 mrcnn_outs.append(mrcnn_out)
                 mrcnn_targets.append(mrcnn_target)
 
-                print(f"grad: {mrcnn_out.deltas.requires_grad}")
-                print(f"grad: {mrcnn_class.requires_grad}")
-                print(f"grad: {rois_.requires_grad}")
+                # print(f"grad: {mrcnn_out.deltas.requires_grad}")
+                # print(f"grad: {mrcnn_class.requires_grad}")
+                # print(f"grad: {rois_.requires_grad}")
                 # prepare mrcnn_out to mAP
                 if mrcnn_class.nelement() != 0:
                     detections = detection_layer2(self.config, rois_,
                                                   mrcnn_class, mrcnn_out.deltas,
                                                   image_metas)
-                    print(f"det grad {detections.requires_grad}")
+                    # print(f"det grad {detections.requires_grad}")
                     # use gt for mAP
                     # call mAP (move to loss)
                     try:
-                        print(f"mrcnn_mask_ {mrcnn_mask_.requires_grad}")
+                        # print(f"mrcnn_mask_ {mrcnn_mask_.requires_grad}")
                         precision = compute_iou_loss(gt.masks[i], gt_boxes[i],
                                                      gt.class_ids[i],
                                                      image_metas[i], self.config,
                                                      detections,
                                                      mrcnn_mask_)
-                        print(f"precision {precision.requires_grad}")
+                        # print(f"precision {precision.requires_grad}")
                         print(f"precision is {precision}")
                         precisions[i] = precision
                     except utils.NonPositiveAreaError as e:
@@ -519,6 +538,9 @@ class MaskRCNN(nn.Module):
             else:
                 print('optimizing mAP')
                 outputs[-1].backward()
+
+            gpu_profile(frame=sys._getframe(), event='line', arg=None)
+
             torch.nn.utils.clip_grad_norm_(self.parameters(), 5.0)
             optimizer.step()
 
