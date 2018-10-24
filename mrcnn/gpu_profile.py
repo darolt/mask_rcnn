@@ -1,6 +1,7 @@
 import datetime
 import linecache
 import os
+import gc
 
 from py3nvml import py3nvml
 import torch
@@ -81,7 +82,6 @@ def gpu_profile(frame, event, arg):
 
 
 def _get_tensors(gpu_only=True):
-    import gc
     for obj in gc.get_objects():
         try:
             if torch.is_tensor(obj):
