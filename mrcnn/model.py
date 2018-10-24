@@ -528,8 +528,11 @@ class MaskRCNN(nn.Module):
             # Run object detection
             outputs = self.predict(images, image_metas, mode='training', gt=gt)
 
+            del images, image_metas, gt
+
             # Compute losses
             losses_epoch = compute_losses(rpn_target, *outputs[:-1])
+            del rpn_target
 
             # Backpropagation
             #losses_epoch.total.backward()
@@ -538,6 +541,8 @@ class MaskRCNN(nn.Module):
             else:
                 print('optimizing mAP')
                 outputs[-1].backward()
+
+            del outputs
 
             gpu_profile(frame=sys._getframe(), event='line', arg=None)
 
@@ -549,6 +554,8 @@ class MaskRCNN(nn.Module):
 
             # Statistics
             losses_sum = losses_sum + losses_epoch/steps
+
+            del losses_epoch
 
         return losses_sum
 
