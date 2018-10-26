@@ -34,7 +34,6 @@ from mrcnn.resnet import ResNet
 from mrcnn.rpn import RPN
 from mrcnn.fpn import FPN, Classifier, Mask
 from mrcnn.detection_target import detection_target_layer
-from mrcnn.gpu_profile import gpu_profile
 
 
 def memReport():
@@ -544,8 +543,6 @@ class MaskRCNN(nn.Module):
 
             del outputs
 
-            gpu_profile(frame=sys._getframe(), event='line', arg=None)
-
             torch.nn.utils.clip_grad_norm_(self.parameters(), 5.0)
             optimizer.step()
 
@@ -553,7 +550,7 @@ class MaskRCNN(nn.Module):
             utils.printProgressBar(step + 1, steps, losses_epoch)
 
             # Statistics
-            losses_sum = losses_sum + losses_epoch/steps
+            #losses_sum = losses_sum + losses_epoch.detach()/steps
 
             del losses_epoch
 

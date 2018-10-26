@@ -444,9 +444,10 @@ if __name__ == '__main__':
 
     if args.debug:
         import sys
-        from mrcnn.gpu_profile import gpu_profile
+        from mrcnn.gpu_profile import trace_calls
         os.environ['GPU_DEBUG'] = '1'
-        sys.settrace(gpu_profile)
+        os.environ['TRACE_INTO'] = 'train_epoch'
+        sys.settrace(trace_calls)
 
     # Configurations
     if args.command == "train":

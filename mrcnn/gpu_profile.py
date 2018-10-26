@@ -1,84 +1,71 @@
-import datetime
-import linecache
 import os
 import gc
+import torch
+import datetime
 
 from py3nvml import py3nvml
-import torch
 
-print_tensor_sizes = True
-last_tensor_sizes = set()
-gpu_profile_fn = f'{datetime.datetime.now():%d-%b-%y-%H:%M:%S}-gpu_mem_prof.txt'
+PRINT_TENSOR_SIZES = True
+EMPTY_CACHE = True
+gpu_profile_fn = (f"{datetime.datetime.now():%d-%b-%y-%H:%M:%S}"
+                  f"-gpu_mem_prof.txt")
 if 'GPU_DEBUG' in os.environ:
     print('profiling gpu usage to ', gpu_profile_fn)
 
-lineno = None
-func_name = None
-filename = None
-module_name = None
+_last_tensor_sizes = set()
 
 
-def gpu_profile(frame, event, arg):
-    # it is _about to_ execute (!)
-    global last_tensor_sizes
-    global lineno, func_name, filename, module_name
+def _trace_lines(frame, event, arg):
+    if event != 'line':
+        return
+    if EMPTY_CACHE:
+        torch.cuda.empty_cache()
+    co = frame.f_code
+    func_name = co.co_name
+    line_no = frame.f_lineno
+    filename = co.co_filename
+    py3nvml.nvmlInit()
+    mem_used = _get_gpu_mem_used()
+    where_str = f"{func_name} in {filename}:{line_no}"
+    with open(gpu_profile_fn, 'a+') as f:
+        f.write(f"{where_str} --> {mem_used:<7.1f}Mb\n")
+        if PRINT_TENSOR_SIZES:
+            _print_tensors(f, where_str)
 
-    if event == 'line':
-        try:
-            # about _previous_ line (!)
-            if lineno is not None:
-                py3nvml.nvmlInit()
-                handle = py3nvml.nvmlDeviceGetHandleByIndex(
-                    int(os.environ['GPU_DEBUG']))
-                meminfo = py3nvml.nvmlDeviceGetMemoryInfo(handle)
-                line = linecache.getline(filename, lineno)
-                where_str = module_name+' '+func_name+':'+str(lineno)
+    py3nvml.nvmlShutdown()
 
-                with open(gpu_profile_fn, 'a+') as f:
-                    f.write(f"{where_str:<50}"
-                            f":{meminfo.used/1024**2:<7.1f}Mb "
-                            f"{line.rstrip()}\n")
 
-                    if print_tensor_sizes is True:
-                        for tensor in _get_tensors():
-                            if not hasattr(tensor, 'dbg_alloc_where'):
-                                tensor.dbg_alloc_where = where_str
-                        new_tensor_sizes = {(x.type(), tuple(x.shape), x.dbg_alloc_where)
-                                            for x in _get_tensors()}
-                        for t, s, loc in new_tensor_sizes - last_tensor_sizes:
-                            f.write(f'+ {loc:<50} {str(s):<20} {str(t):<10}\n')
-                        for t, s, loc in last_tensor_sizes - new_tensor_sizes:
-                            f.write(f'- {loc:<50} {str(s):<20} {str(t):<10}\n')
-                        last_tensor_sizes = new_tensor_sizes
-                py3nvml.nvmlShutdown()
+def trace_calls(frame, event, arg):
+    if event != 'call':
+        return
+    co = frame.f_code
+    func_name = co.co_name
 
-            # save details about line _to be_ executed
-            lineno = None
+    trace_into = str(os.environ['TRACE_INTO'])
+    if func_name in trace_into.split(' '):
+        return _trace_lines
+    return
 
-            func_name = frame.f_code.co_name
-            filename = frame.f_globals["__file__"]
-            if (filename.endswith(".pyc") or
-                    filename.endswith(".pyo")):
-                filename = filename[:-1]
-            module_name = frame.f_globals["__name__"]
-            lineno = frame.f_lineno
 
-            if 'gmwda-pytorch' not in os.path.dirname(os.path.abspath(filename)):
-                lineno = None  # skip current line evaluation
+def _get_gpu_mem_used():
+    handle = py3nvml.nvmlDeviceGetHandleByIndex(
+        int(os.environ['GPU_DEBUG']))
+    meminfo = py3nvml.nvmlDeviceGetMemoryInfo(handle)
+    return meminfo.used/1024**2
 
-            if ('car_datasets' in filename
-                    or '_exec_config' in func_name
-                    or 'gpu_profile' in module_name
-                    or 'tee_stdout' in module_name):
-                lineno = None  # skip current
 
-            return gpu_profile
-
-        except (KeyError, AttributeError):
-            print('error')
-            pass
-
-    return gpu_profile
+def _print_tensors(f, where_str):
+    global _last_tensor_sizes
+    for tensor in _get_tensors():
+        if not hasattr(tensor, 'dbg_alloc_where'):
+            tensor.dbg_alloc_where = where_str
+    new_tensor_sizes = {(x.type(), tuple(x.shape), x.dbg_alloc_where)
+                        for x in _get_tensors()}
+    for t, s, loc in new_tensor_sizes - _last_tensor_sizes:
+        f.write(f'+ {loc:<50} {str(s):<20} {str(t):<10}\n')
+    for t, s, loc in _last_tensor_sizes - new_tensor_sizes:
+        f.write(f'- {loc:<50} {str(s):<20} {str(t):<10}\n')
+    _last_tensor_sizes = new_tensor_sizes
 
 
 def _get_tensors(gpu_only=True):
