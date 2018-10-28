@@ -6,6 +6,7 @@ import datetime
 from py3nvml import py3nvml
 
 PRINT_TENSOR_SIZES = True
+# clears GPU cache frequently, showing only actual memory usage
 EMPTY_CACHE = True
 gpu_profile_fn = (f"{datetime.datetime.now():%d-%b-%y-%H:%M:%S}"
                   f"-gpu_mem_prof.txt")
@@ -41,7 +42,11 @@ def trace_calls(frame, event, arg):
     co = frame.f_code
     func_name = co.co_name
 
-    trace_into = str(os.environ['TRACE_INTO'])
+    try:
+        trace_into = str(os.environ['TRACE_INTO'])
+    except:
+        print(os.environ)
+        exit()
     if func_name in trace_into.split(' '):
         return _trace_lines
     return

@@ -434,6 +434,9 @@ if __name__ == '__main__':
                         help='Logs and checkpoints directory (default=logs/)')
     parser.add_argument('--debug', required=False,
                         help='Turn on debugger.')
+    parser.add_argument('--dev', required=False,
+                        default=0,
+                        help='CUDA current device.')
     args = parser.parse_args()
 
     print("Command: ", args.command)
@@ -442,10 +445,10 @@ if __name__ == '__main__':
     print("Logs: ", args.logs)
     print(f"Debug: {args.debug}")
 
-    if args.debug:
+    if args.debug and torch.cuda.device_count() > 0:
         import sys
         from mrcnn.gpu_profile import trace_calls
-        os.environ['GPU_DEBUG'] = '1'
+        os.environ['GPU_DEBUG'] = args.dev
         os.environ['TRACE_INTO'] = 'train_epoch'
         sys.settrace(trace_calls)
 
@@ -454,7 +457,10 @@ if __name__ == '__main__':
         config = NucleusConfig()
     else:
         config = InferenceConfig()
-    mrcnn.config.DEVICE = torch.device('cuda:1' if config.GPU_COUNT else 'cpu')
+    if config.GPU_COUNT:
+        mrcnn.config.DEVICE = torch.device('cuda:' + str(args.dev))
+    else:
+        mrcnn.config.DEVICE = torch.device('cpu')
     config.display()
 
     # Create model
@@ -491,16 +497,17 @@ if __name__ == '__main__':
     else:
         model.load_weights(model_path)
 
-    with torch.cuda.device(1):
-        model.to(mrcnn.config.DEVICE)
-    # print(model)
+    if torch.cuda.device_count() > 0:
+        with torch.cuda.device(args.dev):
+            model.to(mrcnn.config.DEVICE)
 
-    if args.command == "train":
-        with torch.cuda.device(1):
+    with torch.cuda.device(args.dev):
+        if args.command == "train":
             train(model, args.dataset, 'train')
-    elif args.command == "detect":
-        detect(model, args.dataset, 'val')
-    elif args.command == "metric":
-        compute_metric(model, args.dataset, 'stage1_test')
-    else:
-        print(f"'{args.command}' is not recognized. Use 'train' or 'detect'")
+        elif args.command == "detect":
+            detect(model, args.dataset, 'val')
+        elif args.command == "metric":
+            compute_metric(model, args.dataset, 'stage1_test')
+        else:
+            print(f"'{args.command}' is not recognized. Use 'train', 'detect'"
+                  f" or 'metric'")

@@ -550,7 +550,7 @@ class MaskRCNN(nn.Module):
             utils.printProgressBar(step + 1, steps, losses_epoch)
 
             # Statistics
-            #losses_sum = losses_sum + losses_epoch.detach()/steps
+            losses_sum = losses_sum + losses_epoch.item()/steps
 
             del losses_epoch
 

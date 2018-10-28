@@ -823,7 +823,7 @@ def printProgressBar(iteration, total, losses):
         iteration   - Required  : current iteration (Int)
         total       - Required  : total iterations (Int)
     """
-    losses = losses.to_item()
+    losses = losses.item()
     length = 10
     fill = '█'
     decimals = 1

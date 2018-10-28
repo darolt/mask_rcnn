@@ -17,7 +17,7 @@ class Losses():
         self.mrcnn_mask = mrcnn_mask
         self.update_total_loss()
 
-    def to_item(self):
+    def item(self):
         return Losses(self.rpn_class.item(), self.rpn_bbox.item(),
                       self.mrcnn_class.item(), self.mrcnn_bbox.item(),
                       self.mrcnn_mask.item())
