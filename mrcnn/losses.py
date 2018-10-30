@@ -92,7 +92,6 @@ def compute_rpn_bbox_loss(target_bbox, rpn_match, rpn_bbox):
                -1=negative, 0=neutral anchor.
     rpn_bbox: [batch, anchors, (dy, dx, log(dh), log(dw))]
     """
-
     # Squeeze last dim to simplify
     rpn_match = rpn_match.squeeze(2)
 
@@ -104,7 +103,13 @@ def compute_rpn_bbox_loss(target_bbox, rpn_match, rpn_bbox):
     rpn_bbox = rpn_bbox[indices.detach()[:, 0], indices.detach()[:, 1]]
 
     # Trim target bounding box deltas to the same length as rpn_bbox.
-    target_bbox = target_bbox[0, :rpn_bbox.size()[0], :]
+    ranges_per_img = torch.empty((indices.shape[0]), dtype=torch.long)
+    count = 0
+    for img_idx in range(target_bbox.shape[0]):
+        nb_elem = torch.nonzero(indices.detach()[:, 0] == img_idx).shape[0]
+        ranges_per_img[count:count+nb_elem] = torch.arange(nb_elem)
+        count += nb_elem
+    target_bbox = target_bbox[indices.detach()[:, 0], ranges_per_img]
 
     # Smooth L1 loss
     loss = F.smooth_l1_loss(rpn_bbox, target_bbox)

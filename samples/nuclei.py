@@ -98,7 +98,7 @@ class NucleusConfig(mrcnn.config.Config):
     NAME = "nuclei"
 
     # Adjust depending on your GPU memory
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 6
 
     # Number of classes (including background)
     NUM_CLASSES = 1 + 1  # Background + nucleus
@@ -435,7 +435,7 @@ if __name__ == '__main__':
     parser.add_argument('--debug', required=False,
                         help='Turn on debugger.')
     parser.add_argument('--dev', required=False,
-                        default=0,
+                        default=0, type=int,
                         help='CUDA current device.')
     args = parser.parse_args()
 

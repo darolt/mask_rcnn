@@ -36,21 +36,6 @@ from mrcnn.fpn import FPN, Classifier, Mask
 from mrcnn.detection_target import detection_target_layer
 
 
-def memReport():
-    for obj in gc.get_objects():
-        if torch.is_tensor(obj) or (hasattr(obj, 'data') and torch.is_tensor(obj.data)):
-            print(type(obj), obj.size())
-
-
-def cpuStats():
-        print(sys.version)
-        print(psutil.cpu_percent())
-        print(psutil.virtual_memory())  # physical memory usage
-        pid = os.getpid()
-        py = psutil.Process(pid)
-        memoryUse = py.memory_info()[0] / 2. ** 30  # memory use in GB...I think
-        print('memory GB:', memoryUse)
-
 ############################################################
 #  MaskRCNN Class
 ############################################################
@@ -107,7 +92,8 @@ class MaskRCNN(nn.Module):
                     config.BACKBONE_SHAPES,
                     config.BACKBONE_STRIDES,
                     config.RPN_ANCHOR_STRIDE)
-        anchors = np.broadcast_to(anchors, (2,) + anchors.shape)
+        anchors = np.broadcast_to(anchors,
+                                  (self.config.BATCH_SIZE,) + anchors.shape)
         self.anchors = torch.from_numpy(anchors).float()
         self.anchors = self.anchors.to(mrcnn.config.DEVICE)
 
@@ -291,7 +277,7 @@ class MaskRCNN(nn.Module):
         if classname.find('BatchNorm') != -1:
             m.eval()
 
-    def predict(self, molded_images, image_metas, mode, gt=None):
+    def predict(self, molded_images, image_metas, mode='training', gt=None):
 
         if mode not in ['inference', 'training']:
             raise ValueError(f"mode {mode} not accepted.")
@@ -379,8 +365,9 @@ class MaskRCNN(nn.Module):
             # Subsamples proposals and generates target outputs for training
             # Note that proposal class IDs, gt_boxes, and gt_masks are zero
             # padded. Equally, returned rois and targets are zero padded.
-            mrcnn_targets, mrcnn_outs, rois = [], [], []
+            mrcnn_targets, mrcnn_outs = [], []
             precisions = torch.zeros((rpn_rois.size()[0]), dtype=torch.float)
+            one_is_empty = False
             for i in range(0, rpn_rois.size()[0]):
                 rois_, mrcnn_target = detection_target_layer(
                     rpn_rois[i], gt.class_ids[i], gt.boxes[i], gt.masks[i],
@@ -389,9 +376,9 @@ class MaskRCNN(nn.Module):
                 if rois_.nelement() == 0:
                     mrcnn_out = get_empty_mrcnn_out().to(mrcnn.config.DEVICE)
                     mrcnn_class = torch.FloatTensor().to(mrcnn.config.DEVICE)
+                    one_is_empty = True
                     print('Rois size is empty')
                 else:
-                    print('Not empty')
                     # Network Heads
                     # Proposal classifier and BBox regressor heads
                     rois_ = rois_.unsqueeze(0)
@@ -412,6 +399,8 @@ class MaskRCNN(nn.Module):
                 # print(f"grad: {mrcnn_class.requires_grad}")
                 # print(f"grad: {rois_.requires_grad}")
                 # prepare mrcnn_out to mAP
+                if one_is_empty:
+                    continue
                 if mrcnn_class.nelement() != 0:
                     detections = detection_layer2(self.config, rois_,
                                                   mrcnn_class, mrcnn_out.deltas,
@@ -432,7 +421,7 @@ class MaskRCNN(nn.Module):
                     except utils.NonPositiveAreaError as e:
                         print(str(e))
 
-            return (rpn_out, mrcnn_targets, mrcnn_outs, precisions.mean())
+            return (rpn_out, mrcnn_targets, mrcnn_outs, precisions.mean()), one_is_empty
 
     def train_model(self, train_dataset, val_dataset, learning_rate, epochs,
                     layers, augmentation=None):
@@ -458,16 +447,13 @@ class MaskRCNN(nn.Module):
         # Data generators
         train_set = Dataset(train_dataset, self.config,
                             augmentation=augmentation)
-        train_generator = torch.utils.data.DataLoader(train_set,
-                                                      batch_size=2,
-                                                      shuffle=True,
-                                                      num_workers=4)
+        train_generator = torch.utils.data.DataLoader(
+            train_set, shuffle=True, batch_size=self.config.BATCH_SIZE,
+            num_workers=4)
         val_set = Dataset(val_dataset, self.config,
                           augmentation=augmentation)
-        val_generator = torch.utils.data.DataLoader(val_set,
-                                                    batch_size=1,
-                                                    shuffle=True,
-                                                    num_workers=4)
+        val_generator = torch.utils.data.DataLoader(
+            val_set, batch_size=1, shuffle=True, num_workers=4)
 
         # Train
         utils.log(f"\nStarting at epoch {self.epoch+1}. LR={learning_rate}\n")
@@ -525,7 +511,7 @@ class MaskRCNN(nn.Module):
             optimizer.zero_grad()
 
             # Run object detection
-            outputs = self.predict(images, image_metas, mode='training', gt=gt)
+            outputs, one_is_empty = self.predict(images, image_metas, gt=gt)
 
             del images, image_metas, gt
 
@@ -535,10 +521,9 @@ class MaskRCNN(nn.Module):
 
             # Backpropagation
             #losses_epoch.total.backward()
-            if outputs[2][0].deltas.nelement() == 0 or outputs[2][1].deltas.nelement() == 0:
+            if one_is_empty:
                 losses_epoch.total.backward()
             else:
-                print('optimizing mAP')
                 outputs[-1].backward()
 
             del outputs
@@ -568,16 +553,16 @@ class MaskRCNN(nn.Module):
             images, image_metas, rpn_target, gt = self.prepare_inputs(inputs)
 
             # Run object detection
-            outputs = self.predict(images, image_metas, mode='training', gt=gt)
+            outputs, one_is_empty = self.predict(images, image_metas, gt=gt)
 
             try:
-                if outputs[1][0].class_ids.nelement() == 0:
+                if one_is_empty:
                     continue
             except IndexError:
                 continue
 
             # Compute losses
-            losses_epoch = compute_losses(rpn_target, *outputs)
+            losses_epoch = compute_losses(rpn_target, *outputs[:-1])
 
             # Progress
             utils.printProgressBar(step + 1, steps, losses_epoch)
