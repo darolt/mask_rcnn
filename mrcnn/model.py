@@ -472,26 +472,31 @@ class MaskRCNN(nn.Module):
             {'params': trainables_only_bn}
         ], lr=learning_rate, momentum=self.config.LEARNING_MOMENTUM)
 
+        predictions = []
+        val_predictions = []
         for epoch in range(self.epoch+1, epochs+1):
             utils.log("Epoch {}/{}.".format(epoch, epochs))
 
             # Training
-            train_losses = self.train_epoch(train_generator,
-                                            optimizer,
-                                            self.config.STEPS_PER_EPOCH)
+            train_losses, preds = self.train_epoch(
+                train_generator, optimizer, self.config.STEPS_PER_EPOCH)
+            predictions.append(preds)
+
 
             # Validation
             with torch.no_grad():
-                val_losses = self.valid_epoch(val_generator,
-                                              self.config.VALIDATION_STEPS)
+                val_losses, preds = self.valid_epoch(
+                    val_generator, self.config.VALIDATION_STEPS)
+                val_predictions.append(preds)
 
             # Statistics
-            self.loss_history.append(train_losses.to_list())
-            self.val_loss_history.append(val_losses.to_list())
-            visualize.plot_loss(self.loss_history,
-                                self.val_loss_history,
-                                save=True,
-                                log_dir=self.log_dir)
+            self.loss_history.append(train_losses)
+            self.val_loss_history.append(val_losses)
+            visualize.plot_losses(self.loss_history,
+                                  self.val_loss_history,
+                                  predictions,
+                                  val_predictions,
+                                  log_dir=self.log_dir)
 
             # Save model
             torch.save(self.state_dict(), self.checkpoint_path.format(epoch))
@@ -500,6 +505,7 @@ class MaskRCNN(nn.Module):
 
     def train_epoch(self, datagenerator, optimizer, steps):
         losses_sum = Losses()
+        predictions = []
 
         for step, inputs in enumerate(datagenerator):
             if step == steps:
@@ -512,6 +518,7 @@ class MaskRCNN(nn.Module):
 
             # Run object detection
             outputs, one_is_empty = self.predict(images, image_metas, gt=gt)
+            predictions.append(outputs[-1])
 
             del images, image_metas, gt
 
@@ -524,7 +531,8 @@ class MaskRCNN(nn.Module):
             if one_is_empty:
                 losses_epoch.total.backward()
             else:
-                outputs[-1].backward()
+                inv_precision = 1.0/outputs[-1]
+                inv_precision.backward()
 
             del outputs
 
@@ -539,10 +547,11 @@ class MaskRCNN(nn.Module):
 
             del losses_epoch
 
-        return losses_sum
+        return losses_sum, sum(predictions)/len(predictions)
 
     def valid_epoch(self, datagenerator, steps):
         losses_sum = Losses()
+        predictions = []
 
         for step, inputs in enumerate(datagenerator):
             # Break after 'steps' steps
@@ -554,6 +563,7 @@ class MaskRCNN(nn.Module):
 
             # Run object detection
             outputs, one_is_empty = self.predict(images, image_metas, gt=gt)
+            predictions.append(outputs[-1])
 
             try:
                 if one_is_empty:
@@ -568,9 +578,9 @@ class MaskRCNN(nn.Module):
             utils.printProgressBar(step + 1, steps, losses_epoch)
 
             # Statistics
-            losses_sum = losses_sum + losses_epoch/steps
+            losses_sum = losses_sum + losses_epoch.item()/steps
 
-        return losses_sum
+        return losses_sum, sum(predictions)/len(predictions)
 
     def prepare_inputs(self, inputs):
         images = inputs[0].to(mrcnn.config.DEVICE)

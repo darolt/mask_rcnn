@@ -498,91 +498,46 @@ def display_weight_stats(model):
             ])
     display_table(table)
 
-def plot_loss(loss, val_loss, save=True, log_dir=None):
-    loss = np.array(loss)
-    val_loss = np.array(val_loss)
 
-    plt.figure("loss")
+def plot_losses(losses, val_losses, predictions=None, val_preds=None,
+                save=True, log_dir=None):
+
+    plot_names = ['total', 'rpn_class', 'rpn_bbox', 'mrcnn_class',
+                  'mrcnn_bbox', 'mrcnn_mask']
+
+    for plot_name in plot_names:
+        losses_train = [getattr(loss, 'total') for loss in losses]
+        losses_train = np.array(losses_train)
+        losses_val = [getattr(loss, 'total') for loss in val_losses]
+        losses_val = np.array(losses_val)
+
+        plt.figure(f"{plot_name}_loss")
+        plt.gcf().clear()
+        plt.plot(losses_train, label='train')
+        plt.plot(losses_val, label='valid')
+        plt.xlabel('epoch')
+        plt.ylabel(f"{plot_name}_loss")
+        plt.legend()
+        _save_or_show_plot(f"{plot_name}_loss", losses_train, losses_val, save,
+                           log_dir)
+
+    _save_or_show_plot(f"precision_loss", predictions[:], val_preds[:], save,
+                       log_dir)
+
+
+def _save_or_show_plot(fig_name, train, val, save, log_dir):
+    plt.figure(fig_name)
     plt.gcf().clear()
-    plt.plot(loss[:, 0], label='train')
-    plt.plot(val_loss[:, 0], label='valid')
+    plt.plot(train, label='train')
+    plt.plot(val, label='valid')
     plt.xlabel('epoch')
-    plt.ylabel('loss')
+    plt.ylabel(fig_name)
     plt.legend()
+    _save_or_show_plot(save, log_dir, f"{fig_name}.png")
+
     if save:
-        save_path = os.path.join(log_dir, "loss.png")
+        save_path = os.path.join(log_dir, fig_name)
         plt.savefig(save_path)
     else:
         plt.show(block=False)
         plt.pause(0.1)
-
-    plt.figure("rpn_class_loss")
-    plt.gcf().clear()
-    plt.plot(loss[:, 1], label='train')
-    plt.plot(val_loss[:, 1], label='valid')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend()
-    if save:
-        save_path = os.path.join(log_dir, "rpn_class_loss.png")
-        plt.savefig(save_path)
-    else:
-        plt.show(block=False)
-        plt.pause(0.1)
-
-    plt.figure("rpn_bbox_loss")
-    plt.gcf().clear()
-    plt.plot(loss[:, 2], label='train')
-    plt.plot(val_loss[:, 2], label='valid')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend()
-    if save:
-        save_path = os.path.join(log_dir, "rpn_bbox_loss.png")
-        plt.savefig(save_path)
-    else:
-        plt.show(block=False)
-        plt.pause(0.1)
-
-    plt.figure("mrcnn_class_loss")
-    plt.gcf().clear()
-    plt.plot(loss[:, 3], label='train')
-    plt.plot(val_loss[:, 3], label='valid')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend()
-    if save:
-        save_path = os.path.join(log_dir, "mrcnn_class_loss.png")
-        plt.savefig(save_path)
-    else:
-        plt.show(block=False)
-        plt.pause(0.1)
-
-    plt.figure("mrcnn_bbox_loss")
-    plt.gcf().clear()
-    plt.plot(loss[:, 4], label='train')
-    plt.plot(val_loss[:, 4], label='valid')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend()
-    if save:
-        save_path = os.path.join(log_dir, "mrcnn_bbox_loss.png")
-        plt.savefig(save_path)
-    else:
-        plt.show(block=False)
-        plt.pause(0.1)
-
-    plt.figure("mrcnn_mask_loss")
-    plt.gcf().clear()
-    plt.plot(loss[:, 5], label='train')
-    plt.plot(val_loss[:, 5], label='valid')
-    plt.xlabel('epoch')
-    plt.ylabel('loss')
-    plt.legend()
-    if save:
-        save_path = os.path.join(log_dir, "mrcnn_mask_loss.png")
-        plt.savefig(save_path)
-    else:
-        plt.show(block=False)
-        plt.pause(0.1)
-

@@ -395,15 +395,16 @@ def compute_losses(rpn_target, rpn_out, mrcnn_targets, mrcnn_outs):
                                    device=mrcnn.config.DEVICE)
     mrcnn_mask_loss = torch.tensor([0.0], dtype=torch.float32,
                                    device=mrcnn.config.DEVICE)
-    for batch in range(0, len(mrcnn_targets)):
+
+    for img_idx in range(0, len(mrcnn_targets)):
         mrcnn_class_loss += compute_mrcnn_class_loss(
-            mrcnn_targets[batch].class_ids, mrcnn_outs[batch].class_logits)
+            mrcnn_targets[img_idx].class_ids, mrcnn_outs[img_idx].class_logits)
         mrcnn_bbox_loss += compute_mrcnn_bbox_loss(
-            mrcnn_targets[batch].deltas, mrcnn_targets[batch].class_ids,
-            mrcnn_outs[batch].deltas)
+            mrcnn_targets[img_idx].deltas, mrcnn_targets[img_idx].class_ids,
+            mrcnn_outs[img_idx].deltas)
         mrcnn_mask_loss += compute_mrcnn_mask_loss(
-            mrcnn_targets[batch].masks, mrcnn_targets[batch].class_ids,
-            mrcnn_outs[batch].masks)
+            mrcnn_targets[img_idx].masks, mrcnn_targets[img_idx].class_ids,
+            mrcnn_outs[img_idx].masks)
 
     if len(mrcnn_outs) != 0:
         mrcnn_class_loss /= len(mrcnn_outs)
