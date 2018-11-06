@@ -35,6 +35,7 @@ from imgaug import augmenters as iaa
 from mrcnn import visualize
 import mrcnn.config
 from mrcnn import utils
+from mrcnn import dataset_handler
 from mrcnn import model as modellib
 from mrcnn import losses
 
@@ -172,7 +173,7 @@ class InferenceConfig(NucleusConfig):
 ############################################################
 
 
-class NucleusDataset(utils.Dataset):
+class NucleusDatasetHandler(dataset_handler.DatasetHandler):
     """Handles nuclei dataset.
     """
 
@@ -313,8 +314,8 @@ def mask_to_rle(image_id, mask, scores):
 
 def train(model, dataset_dir, subset):
     """Train the model."""
-    dataset_train = NucleusDataset(dataset_dir, subset)
-    dataset_val = NucleusDataset(dataset_dir, "val")
+    dataset_train = NucleusDatasetHandler(dataset_dir, subset)
+    dataset_val = NucleusDatasetHandler(dataset_dir, "val")
 
     # Image augmentation
     # http://imgaug.readthedocs.io/en/latest/source/augmenters.html
@@ -357,7 +358,7 @@ def detect(model, dataset_dir, subset):
     os.makedirs(submit_dir)
 
     # Read dataset
-    dataset = NucleusDataset(dataset_dir, subset)
+    dataset = NucleusDatasetHandler(dataset_dir, subset)
     # Load over images
     submission = []
     for image_id in dataset.image_ids:
@@ -393,18 +394,26 @@ def compute_metric(model, dataset_dir, subset):
     print("Running on {}".format(dataset_dir))
 
     # Read dataset
-    dataset = NucleusDataset(dataset_dir, subset)
+    dataset_handler = NucleusDatasetHandler(dataset_dir, subset)
     # Load over images
-    precisions = torch.empty((len(dataset)),
-                             device=mrcnn.config.DEVICE)
-    for idx, image_id in enumerate(dataset.image_ids):
+    precisions = torch.empty((len(dataset_handler)), device=mrcnn.config.DEVICE)
+    for idx, image_id in enumerate(dataset_handler.image_ids):
         # Load image and run detection
-        image = dataset.load_image(image_id)
-        masks, _ = dataset.load_mask(image_id)
-        masks = torch.from_numpy(masks.astype(int))
+        image = dataset_handler.load_image(image_id)
+        masks, _ = dataset_handler.load_mask(image_id)
+        gt_masks = torch.from_numpy(masks.astype(int))
+        gt_bboxes = utils.extract_bboxes(gt_masks)
+        gt_bboxes = torch.from_numpy(gt_bboxes).float()
         # Detect objects
         prediction = model.detect([image])[0]
-        precision = losses.compute_iou_loss2(masks, prediction['masks'])
+        precision = losses.compute_iou_loss2(gt_masks, prediction['masks'])
+        print(f"mAP1 {precision}")
+        gt_bboxes = gt_bboxes.to(mrcnn.config.DEVICE).to(torch.float32)
+        pred_bboxes = prediction['rois'].to(mrcnn.config.DEVICE).to(torch.float32)
+        gt_masks = gt_masks.permute(2, 0, 1)
+        pred_masks = prediction['masks'].permute(2, 0, 1)
+        precision = losses.compute_iou_loss3(
+            gt_bboxes, gt_masks, pred_bboxes, pred_masks)
         print(f"precision {precision}")
         precisions[idx] = precision
 

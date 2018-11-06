@@ -10,7 +10,7 @@ from mrcnn import anchors
 ############################################################
 
 
-def load_image_gt(dataset, config, image_id, use_mini_mask=False,
+def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
                   augmentation=None):
     """Load and return ground truth data for an image (image, mask,
        bounding boxes).
@@ -33,8 +33,8 @@ def load_image_gt(dataset, config, image_id, use_mini_mask=False,
         defined in MINI_MASK_SHAPE.
     """
     # Load image and mask
-    image = dataset.load_image(image_id)
-    mask, class_ids = dataset.load_mask(image_id)
+    image = dataset_handler.load_image(image_id)
+    mask, class_ids = dataset_handler.load_mask(image_id)
     shape = image.shape
     image, window, scale, padding, crop = utils.mold_image(image, config)
     mask = utils.resize_mask(mask, scale, padding, crop)
@@ -80,10 +80,10 @@ def load_image_gt(dataset, config, image_id, use_mini_mask=False,
     bbox = utils.extract_bboxes(mask)
 
     # Active classes
-    # Different datasets have different classes, so track the
-    # classes supported in the dataset of this image.
-    active_class_ids = np.zeros([dataset.num_classes], dtype=np.int32)
-    source_class_ids = dataset.source_class_ids[dataset.image_info[image_id]["source"]]
+    # Different dataset_handlers have different classes, so track the
+    # classes supported in the dataset_handler of this image.
+    active_class_ids = np.zeros([dataset_handler.num_classes], dtype=np.int32)
+    source_class_ids = dataset_handler.source_class_ids[dataset_handler.image_info[image_id]["source"]]
     active_class_ids[source_class_ids] = 1
 
     # Resize masks to smaller size to reduce memory usage
@@ -208,12 +208,12 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     return rpn_match, rpn_bbox
 
 
-class Dataset(torch.utils.data.Dataset):
-    def __init__(self, dataset, config, augmentation=None):
+class DataGenerator(torch.utils.data.Dataset):
+    def __init__(self, dataset_handler, config, augmentation=None):
         """A generator that returns images and corresponding target class ids,
             bounding box deltas, and masks.
 
-            dataset: The Dataset object to pick data from
+            dataset_handler: The Dataset object to pick data from
             config: The model config object
             shuffle: If True, shuffles the samples before every epoch
             augment: If True, applies image augmentation to images
@@ -242,10 +242,10 @@ class Dataset(torch.utils.data.Dataset):
             """
         self.b = 0  # batch item index
         self.image_index = -1
-        self.image_ids = np.copy(dataset.image_ids)
+        self.image_ids = np.copy(dataset_handler.image_ids)
         self.error_count = 0
 
-        self.dataset = dataset
+        self.dataset_handler = dataset_handler
         self.config = config
         self.augmentation = augmentation
 
@@ -263,7 +263,7 @@ class Dataset(torch.utils.data.Dataset):
         image_id = self.image_ids[image_index]
         while True:
             image, image_metas, gt_class_ids, gt_boxes, gt_masks = \
-                load_image_gt(self.dataset, self.config, image_id,
+                load_image_gt(self.dataset_handler, self.config, image_id,
                               augmentation=self.augmentation,
                               use_mini_mask=self.config.USE_MINI_MASK)
             if np.any(gt_class_ids > 0):

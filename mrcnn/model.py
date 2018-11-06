@@ -28,7 +28,7 @@ from mrcnn.utils import MRCNNOutput, RPNOutput, RPNTarget,\
 from mrcnn.proposal import proposal_layer
 from mrcnn.detection import detection_layer, detection_layer2
 from mrcnn.dataset import Dataset
-from mrcnn.losses import Losses, compute_losses, compute_iou_loss
+from mrcnn.losses import Losses, compute_losses, compute_iou_loss, compute_rpn_loss
 from mrcnn import visualize
 from mrcnn.resnet import ResNet
 from mrcnn.rpn import RPN
@@ -248,7 +248,7 @@ class MaskRCNN(nn.Module):
         molded_images = torch.from_numpy(molded_images.transpose(0, 3, 1, 2))
 
         # To GPU
-        molded_images = molded_images.to(mrcnn.config.DEVICE)
+        molded_images = molded_images.to(mrcnn.config.DEVICE).float()
 
         # Run object detection
         with torch.no_grad():
@@ -367,7 +367,6 @@ class MaskRCNN(nn.Module):
             # padded. Equally, returned rois and targets are zero padded.
             mrcnn_targets, mrcnn_outs = [], []
             precisions = torch.zeros((rpn_rois.size()[0]), dtype=torch.float)
-            one_is_empty = False
             for i in range(0, rpn_rois.size()[0]):
                 rois_, mrcnn_target = detection_target_layer(
                     rpn_rois[i], gt.class_ids[i], gt.boxes[i], gt.masks[i],
@@ -376,7 +375,6 @@ class MaskRCNN(nn.Module):
                 if rois_.nelement() == 0:
                     mrcnn_out = get_empty_mrcnn_out().to(mrcnn.config.DEVICE)
                     mrcnn_class = torch.FloatTensor().to(mrcnn.config.DEVICE)
-                    one_is_empty = True
                     print('Rois size is empty')
                 else:
                     # Network Heads
@@ -399,12 +397,12 @@ class MaskRCNN(nn.Module):
                 # print(f"grad: {mrcnn_class.requires_grad}")
                 # print(f"grad: {rois_.requires_grad}")
                 # prepare mrcnn_out to mAP
-                if one_is_empty:
+                if rois_.nelement() == 0:
                     continue
                 if mrcnn_class.nelement() != 0:
-                    detections = detection_layer2(self.config, rois_,
-                                                  mrcnn_class, mrcnn_out.deltas,
-                                                  image_metas)
+                    detections = detection_layer2(
+                        self.config, rois_, mrcnn_class, mrcnn_out.deltas,
+                        image_metas)
                     # print(f"det grad {detections.requires_grad}")
                     # use gt for mAP
                     # call mAP (move to loss)
@@ -412,7 +410,7 @@ class MaskRCNN(nn.Module):
                         # print(f"mrcnn_mask_ {mrcnn_mask_.requires_grad}")
                         precision = compute_iou_loss(gt.masks[i], gt_boxes[i],
                                                      gt.class_ids[i],
-                                                     image_metas[i], self.config,
+                                                     image_metas[i],
                                                      detections,
                                                      mrcnn_mask_)
                         # print(f"precision {precision.requires_grad}")
@@ -421,7 +419,7 @@ class MaskRCNN(nn.Module):
                     except utils.NonPositiveAreaError as e:
                         print(str(e))
 
-            return (rpn_out, mrcnn_targets, mrcnn_outs, precisions.mean()), one_is_empty
+            return (rpn_out, mrcnn_targets, mrcnn_outs, precisions.mean())
 
     def train_model(self, train_dataset, val_dataset, learning_rate, epochs,
                     layers, augmentation=None):
@@ -517,22 +515,22 @@ class MaskRCNN(nn.Module):
             optimizer.zero_grad()
 
             # Run object detection
-            outputs, one_is_empty = self.predict(images, image_metas, gt=gt)
-            predictions.append(outputs[-1])
+            outputs = self.predict(images, image_metas, gt=gt)
+            predictions.append(outputs[-1].item())
 
             del images, image_metas, gt
 
             # Compute losses
-            losses_epoch = compute_losses(rpn_target, *outputs[:-1])
+            # losses_epoch = compute_losses(rpn_target, *outputs[:-1])
+            losses_epoch = compute_rpn_loss(rpn_target, outputs[0])
+
             del rpn_target
 
             # Backpropagation
-            #losses_epoch.total.backward()
-            if one_is_empty:
-                losses_epoch.total.backward()
-            else:
-                inv_precision = 1.0/outputs[-1]
-                inv_precision.backward()
+            inv_precision = 1.0/outputs[-1]
+            mAP_rpn = inv_precision.to(mrcnn.config.DEVICE) + losses_epoch.total
+            mAP_rpn.backward()
+            del inv_precision, mAP_rpn
 
             del outputs
 
@@ -562,17 +560,12 @@ class MaskRCNN(nn.Module):
             images, image_metas, rpn_target, gt = self.prepare_inputs(inputs)
 
             # Run object detection
-            outputs, one_is_empty = self.predict(images, image_metas, gt=gt)
+            outputs = self.predict(images, image_metas, gt=gt)
             predictions.append(outputs[-1])
 
-            try:
-                if one_is_empty:
-                    continue
-            except IndexError:
-                continue
-
             # Compute losses
-            losses_epoch = compute_losses(rpn_target, *outputs[:-1])
+            #losses_epoch = compute_losses(rpn_target, *outputs[:-1])
+            losses_epoch = compute_rpn_loss(rpn_target, outputs[0])
 
             # Progress
             utils.printProgressBar(step + 1, steps, losses_epoch)
