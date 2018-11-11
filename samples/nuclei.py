@@ -38,6 +38,7 @@ from mrcnn import utils
 from mrcnn import dataset_handler
 from mrcnn import model as modellib
 from mrcnn import losses
+from mrcnn.data_generator import load_image_gt
 
 matplotlib.use('Agg')
 
@@ -389,7 +390,7 @@ def detect(model, dataset_dir, subset):
     print("Saved to ", submit_dir)
 
 
-def compute_metric(model, dataset_dir, subset):
+def compute_metric(model, dataset_dir, subset, config):
     """Run detection on dataset and compute Kaggle's 2018 Databowl metric."""
     print("Running on {}".format(dataset_dir))
 
@@ -403,19 +404,30 @@ def compute_metric(model, dataset_dir, subset):
         masks, _ = dataset_handler.load_mask(image_id)
         gt_masks = torch.from_numpy(masks.astype(int))
         gt_bboxes = utils.extract_bboxes(gt_masks)
-        gt_bboxes = torch.from_numpy(gt_bboxes).float()
+        gt_bboxes = torch.from_numpy(gt_bboxes).int()
         # Detect objects
-        prediction = model.detect([image])[0]
-        precision = losses.compute_iou_loss2(gt_masks, prediction['masks'])
-        print(f"mAP1 {precision}")
-        gt_bboxes = gt_bboxes.to(mrcnn.config.DEVICE).to(torch.float32)
-        pred_bboxes = prediction['rois'].to(mrcnn.config.DEVICE).to(torch.float32)
-        gt_masks = gt_masks.permute(2, 0, 1)
-        pred_masks = prediction['masks'].permute(2, 0, 1)
-        precision = losses.compute_iou_loss3(
-            gt_bboxes, gt_masks, pred_bboxes, pred_masks)
-        print(f"precision {precision}")
+        predictions, image_metas = model.detect([image])
+        precision = losses.compute_iou_loss2(gt_masks, predictions['masks'])
         precisions[idx] = precision
+        print(f"mAP1 {precision}")
+
+        _, image_meta, gt_class_ids, gt_boxes, gt_masks = load_image_gt(
+            dataset_handler, config, image_id, use_mini_mask=True)
+
+        gt_boxes = torch.from_numpy(gt_boxes)
+        gt_class_ids = torch.from_numpy(gt_class_ids).to(mrcnn.config.DEVICE)
+        gt_masks = torch.from_numpy(gt_masks.astype(np.uint8))
+        gt_boxes = gt_boxes.to(mrcnn.config.DEVICE).to(torch.float32)
+        gt_masks = gt_masks.permute(2, 0, 1)
+        pred_masks = predictions['mrcnn_masks'].squeeze(0).to(mrcnn.config.DEVICE).float()
+        precision = losses.compute_iou_loss(
+            gt_masks.to(mrcnn.config.DEVICE).float(),
+            gt_boxes.to(mrcnn.config.DEVICE).float(),
+            gt_class_ids,
+            image_metas.squeeze(0),
+            predictions['detections'].squeeze(0).to(mrcnn.config.DEVICE).float(),
+            pred_masks)
+        print(f"precision {precision}")
 
     print(f"final precision: {precisions.mean()}")
 
@@ -516,7 +528,7 @@ if __name__ == '__main__':
         elif args.command == "detect":
             detect(model, args.dataset, 'val')
         elif args.command == "metric":
-            compute_metric(model, args.dataset, 'stage1_test')
+            compute_metric(model, args.dataset, 'stage1_test', config)
         else:
             print(f"'{args.command}' is not recognized. Use 'train', 'detect'"
                   f" or 'metric'")

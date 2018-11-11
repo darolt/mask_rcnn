@@ -10,9 +10,6 @@ Written by Waleed Abdulla
 import datetime
 import os
 import re
-import gc
-import sys
-import psutil
 
 import numpy as np
 import mrcnn.config
@@ -27,7 +24,7 @@ from mrcnn.utils import MRCNNOutput, RPNOutput, RPNTarget,\
                         MRCNNGroundTruth, get_empty_mrcnn_out
 from mrcnn.proposal import proposal_layer
 from mrcnn.detection import detection_layer, detection_layer2
-from mrcnn.dataset import Dataset
+from mrcnn.data_generator import DataGenerator
 from mrcnn.losses import Losses, compute_losses, compute_iou_loss, compute_rpn_loss
 from mrcnn import visualize
 from mrcnn.resnet import ResNet
@@ -252,24 +249,26 @@ class MaskRCNN(nn.Module):
 
         # Run object detection
         with torch.no_grad():
-            detections, mrcnn_mask = self.predict(molded_images, image_metas,
-                                                  mode='inference')
+            detections, mrcnn_masks = self.predict(molded_images, image_metas,
+                                                   mode='inference')
 
-        mrcnn_mask = mrcnn_mask.permute(0, 1, 3, 4, 2)
+        mrcnn_masks = mrcnn_masks.permute(0, 1, 3, 4, 2)
 
         # Process detections
         results = []
         for i, image in enumerate(images):
             final_rois, final_class_ids, final_scores, final_masks =\
-                utils.unmold_detections(detections[i], mrcnn_mask[i],
+                utils.unmold_detections(detections[i], mrcnn_masks[i],
                                         image.shape, windows[i])
             results.append({
                 "rois": final_rois,
                 "class_ids": final_class_ids,
                 "scores": final_scores,
                 "masks": final_masks,
+                "detections": detections,
+                "mrcnn_masks": mrcnn_masks,
             })
-        return results
+        return results[0], image_metas
 
     @staticmethod
     def set_bn_eval(m):
@@ -412,7 +411,7 @@ class MaskRCNN(nn.Module):
                                                      gt.class_ids[i],
                                                      image_metas[i],
                                                      detections,
-                                                     mrcnn_mask_)
+                                                     mrcnn_mask_.permute(0, 2, 3, 1))
                         # print(f"precision {precision.requires_grad}")
                         print(f"precision is {precision}")
                         precisions[i] = precision
@@ -443,12 +442,12 @@ class MaskRCNN(nn.Module):
             layers = MaskRCNN.LAYER_REGEX[layers]
 
         # Data generators
-        train_set = Dataset(train_dataset, self.config,
+        train_set = DataGenerator(train_dataset, self.config,
                             augmentation=augmentation)
         train_generator = torch.utils.data.DataLoader(
             train_set, shuffle=True, batch_size=self.config.BATCH_SIZE,
             num_workers=4)
-        val_set = Dataset(val_dataset, self.config,
+        val_set = DataGenerator(val_dataset, self.config,
                           augmentation=augmentation)
         val_generator = torch.utils.data.DataLoader(
             val_set, batch_size=1, shuffle=True, num_workers=4)

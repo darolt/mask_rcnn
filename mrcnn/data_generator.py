@@ -5,10 +5,6 @@ import numpy as np
 from mrcnn import utils
 from mrcnn import anchors
 
-############################################################
-#  Data Generator
-############################################################
-
 
 def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
                   augmentation=None):
@@ -88,7 +84,7 @@ def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
 
     # Resize masks to smaller size to reduce memory usage
     if use_mini_mask:
-        mask = utils.minimize_mask(bbox, mask, config.MINI_MASK_SHAPE)
+        mask = utils.minimize_masks(bbox, mask, config.MINI_MASK_SHAPE)
 
     # Image meta data
     image_meta = utils.compose_image_meta(image_id, shape,

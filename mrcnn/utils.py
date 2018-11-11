@@ -11,9 +11,8 @@ import random
 import numpy as np
 import scipy.misc
 import scipy.ndimage
-import skimage.color
-import skimage.io
 import torch
+import skimage.transform
 import urllib.request
 import torch.nn as nn
 import shutil
@@ -58,6 +57,7 @@ def clip_boxes(boxes, window):
          boxes[:, :, 2].clamp(float(window[0]), float(window[2])),
          boxes[:, :, 3].clamp(float(window[1]), float(window[3]))], 2)
     return boxes
+
 
 def extract_bboxes(mask):
     """Compute bounding boxes from masks.
@@ -493,22 +493,22 @@ def resize_mask(mask, scale, padding, crop=None):
     return mask
 
 
-def minimize_mask(bbox, mask, mini_shape):
+def minimize_masks(boxes, masks, mini_shape):
     """Resize masks to a smaller version to cut memory load.
     Mini-masks can then resized back to image scale using expand_masks()
 
     See inspect_data.ipynb notebook for more details.
     """
-    mini_mask = np.zeros(mini_shape + (mask.shape[-1],), dtype=bool)
-    for i in range(mask.shape[-1]):
-        m = mask[:, :, i].astype(bool)
-        y1, x1, y2, x2 = bbox[i][:4]
+    mini_masks = np.zeros(mini_shape + (masks.shape[-1],), dtype=bool)
+    for i in range(masks.shape[-1]):
+        m = masks[:, :, i].astype(bool)
+        y1, x1, y2, x2 = boxes[i][:4]
         m = m[y1:y2, x1:x2]
         if m.size == 0:
             raise Exception("Invalid bounding box with area of zero")
         m = skimage.transform.resize(m, mini_shape, order=1, mode="constant")
-        mini_mask[:, :, i] = np.around(m).astype(np.bool)
-    return mini_mask
+        mini_masks[:, :, i] = np.around(m).astype(np.bool)
+    return mini_masks
 
 
 def expand_mask(bbox, mini_mask, image_shape):

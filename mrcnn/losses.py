@@ -229,23 +229,21 @@ def compute_iou_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
     """Compute loss for single image according to:
        https://www.kaggle.com/c/data-science-bowl-2018#evaluation
     """
-    # remove zeros (padding)
     image_shape = np.array(image_metas[1:4])
     window = np.array(image_metas[4:8])
-    zero_ix = np.where(gt_class_ids == 0)[0]
-    N = zero_ix[0] if zero_ix.shape[0] > 0 else gt_class_ids.shape[0]
 
-    # 1 - unmold gt and mrcnn masks
-    mrcnn_masks = mrcnn_masks.permute(0, 2, 3, 1)
+    # unmold mrcnn masks
     pred_boxes, pred_masks = utils.unmold_detections_x(detections, mrcnn_masks,
                                                        image_shape[:2], window)
 
     # ground truth does not require grad computation
     with torch.no_grad():
-        gt_masks = gt_masks[:N].detach()
-        gt_boxes = gt_boxes[:N].detach()
-        gt_boxes, gt_masks = utils.unmold_boxes_x(gt_boxes, gt_class_ids, gt_masks,
-                                                  image_shape[:2], window)
+        # remove zeros (padding)
+        zero_ix = np.where(gt_class_ids == 0)[0]
+        N = zero_ix[0] if zero_ix.shape[0] > 0 else gt_class_ids.shape[0]
+        gt_boxes, gt_masks = utils.unmold_boxes_x(
+            gt_boxes[:N], gt_class_ids[:N], gt_masks[:N], image_shape[:2],
+            window)
 
     ious = compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks)
 
@@ -290,9 +288,35 @@ def get_intersection_idx(box1, box2):
 
 
 def compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks):
+    """Compute Intersection over Union of ground truth and predicted masks.
+    gt_masks and pred_masks must be in mini-mask format. Boxes indicate mask
+    position inside original image.
+
+    Args:
+        gt_boxes (torch.FloatTensor((4))):
+            Ground truth bounding boxes.
+        gt_masks (list of torch.IntTensor):
+            Ground truth masks with shape (nb_gt_masks, mask_height,
+            mask_width). mask_height and mask_width are variable.
+        pred_boxes (torch.FloatTensor((4))):
+            Predicted boxes.
+        pred_masks (torch.FloatTensor((nb_pred_masks, img_height, img_width))):
+            Predicted masks.
+        pred_masks (list of torch.IntTensor):
+            Predicted masks with shape (nb_pred_masks, mask_height,
+            mask_width). mask_height and mask_width are variable.
+
+    Returns:
+        ious (torch.FloatTensor((nb_gt_masks, nb_pred_masks))):
+            Intersection over Union.
+    """
     # compute IOUs
     ious = torch.zeros((len(gt_masks), len(pred_masks)),
                        dtype=torch.float)
+    intersections = torch.zeros((len(gt_masks), len(pred_masks)),
+                                dtype=torch.float)
+    unions = torch.zeros((len(gt_masks), len(pred_masks)),
+                         dtype=torch.float)
     print(f"{len(gt_masks)} x {len(pred_masks)}")
     for gt_idx in range(0, len(gt_masks)):
         gt_box = gt_boxes[gt_idx]
@@ -323,18 +347,34 @@ def compute_ious_x(gt_boxes, gt_masks, pred_boxes, pred_masks):
                 union = pred_area + gt_area - intersection
                 iou = intersection/union
                 ious[gt_idx, pred_idx] = iou
-                # print(iou.requires_grad)
+                intersections[gt_idx, pred_idx] = intersection
+                unions[gt_idx, pred_idx] = union
 
-    # print(f"ious {ious.requires_grad}")
     return ious
 
 
 def compute_ious(gt_masks, pred_masks):
+    """Compute Intersection over Union of ground truth and predicted masks.
+
+    Args:
+        gt_masks (torch.IntTensor((img_height, img_width, nb_gt_masks))):
+            Ground truth masks.
+        pred_masks (torch.FloatTensor((img_height, img_width, nb_pred_masks))):
+            Predicted masks.
+
+    Returns:
+        ious (torch.FloatTensor((nb_gt_masks, nb_pred_masks))):
+            Intersection over Union.
+    """
     # compute IOUs
     gt_masks = gt_masks.to(torch.uint8)
     pred_masks = pred_masks.to(torch.uint8)
     ious = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
                        dtype=torch.float)
+    intersections = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
+                                dtype=torch.float)
+    unions = torch.zeros((gt_masks.shape[2], pred_masks.shape[2]),
+                         dtype=torch.float)
     # print(f"{gt_masks.shape[2]} x {pred_masks.shape[2]}")
     for gt_idx in range(0, gt_masks.shape[2]):
         for pred_idx in range(0, pred_masks.shape[2]):
@@ -344,6 +384,8 @@ def compute_ious(gt_masks, pred_masks):
             union = torch.nonzero(union).shape[0]
             iou = intersection/union if union != 0.0 else 0.0
             ious[gt_idx, pred_idx] = iou
+            intersections[gt_idx, pred_idx] = intersection
+            unions[gt_idx, pred_idx] = union
     return ious
 
 
@@ -354,9 +396,9 @@ def compute_mAP(ious):
     precisions = torch.empty_like(thresholds, device=mrcnn.config.DEVICE)
     for thresh_idx, threshold in enumerate(thresholds):
         hits = ious > threshold
-        tp = torch.nonzero(hits.sum(dim=0)).shape[0]
-        fp = torch.nonzero(hits.sum(dim=1) == 0).shape[0]
-        fn = torch.nonzero(hits.sum(dim=0) == 0).shape[0]
+        tp = torch.nonzero(hits.sum(dim=1)).shape[0]
+        fp = torch.nonzero(hits.sum(dim=0) == 0).shape[0]
+        fn = torch.nonzero(hits.sum(dim=1) == 0).shape[0]
         precisions[thresh_idx] = tp/(tp + fp + fn)
 
     # average precisions
@@ -370,9 +412,9 @@ def compute_mAP_x(ious):
     precisions = torch.empty_like(thresholds, device=mrcnn.config.DEVICE)
     for thresh_idx, threshold in enumerate(thresholds):
         hits = torch.round(0.5 + ious - threshold)
-        tp = (hits.sum(dim=0)*100.0).sigmoid().sum()
-        fp = ((1 - hits.sum(dim=1))*100.0).sigmoid().sum()
-        fn = ((1 - hits.sum(dim=0))*100.0).sigmoid().sum()
+        tp = ((hits.sum(dim=1) - 0.5)*100.0).sigmoid().sum()
+        fp = (1 - (hits.sum(dim=0) - 0.5)*100.0).sigmoid().sum()
+        fn = (1 - (hits.sum(dim=1) - 0.5)*100.0).sigmoid().sum()
         precisions[thresh_idx] = tp/(tp + fp + fn)
 
     # average precisions

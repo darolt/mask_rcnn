@@ -7,16 +7,11 @@ from mrcnn.proposal import apply_box_deltas
 from nms.nms_wrapper import nms
 
 
-############################################################
-#  Detection Layer
-############################################################
-
-
 def detection_layer2(config, rois, probs, deltas, image_meta):
     """Refine classified proposals and filter overlaps and return final
     detections.
 
-    Inputs:
+    Args:
         rois: [N, (y1, x1, y2, x2)] in normalized coordinates
         probs: [N, num_classes]. Class probabilities.
         deltas: [N, num_classes, (dy, dx, log(dh), log(dw))]. Class-specific
@@ -24,7 +19,8 @@ def detection_layer2(config, rois, probs, deltas, image_meta):
         window: (y1, x1, y2, x2) in image coordinates. The part of the image
             that contains the image excluding the padding.
 
-    Returns detections shaped: [N, (y1, x1, y2, x2, class_id, score)]
+    Returns:
+        detections: [N, (y1, x1, y2, x2, class_id, score)]
     """
     refined_rois, class_ids, class_scores = detection_layer3(config, rois,
                                                              probs, deltas,
