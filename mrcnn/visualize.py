@@ -499,30 +499,23 @@ def display_weight_stats(model):
     display_table(table)
 
 
-def plot_losses(losses, val_losses, predictions=None, val_preds=None,
+def plot_losses(losses, val_losses, precisions=None, val_precisions=None,
                 save=True, log_dir=None):
 
     plot_names = ['total', 'rpn_class', 'rpn_bbox', 'mrcnn_class',
                   'mrcnn_bbox', 'mrcnn_mask']
 
     for plot_name in plot_names:
-        losses_train = [getattr(loss, 'total') for loss in losses]
+        losses_train = [getattr(loss, plot_name) for loss in losses]
         losses_train = np.array(losses_train)
-        losses_val = [getattr(loss, 'total') for loss in val_losses]
+        losses_val = [getattr(loss, plot_name) for loss in val_losses]
         losses_val = np.array(losses_val)
-
-        plt.figure(f"{plot_name}_loss")
-        plt.gcf().clear()
-        plt.plot(losses_train, label='train')
-        plt.plot(losses_val, label='valid')
-        plt.xlabel('epoch')
-        plt.ylabel(f"{plot_name}_loss")
-        plt.legend()
         _save_or_show_plot(f"{plot_name}_loss", losses_train, losses_val, save,
                            log_dir)
 
-    _save_or_show_plot(f"precision_loss", predictions[:], val_preds[:], save,
-                       log_dir)
+    if precisions:
+        _save_or_show_plot(f"precision_loss", precisions[:],
+                           val_precisions[:], save, log_dir)
 
 
 def _save_or_show_plot(fig_name, train, val, save, log_dir):
@@ -533,7 +526,6 @@ def _save_or_show_plot(fig_name, train, val, save, log_dir):
     plt.xlabel('epoch')
     plt.ylabel(fig_name)
     plt.legend()
-    _save_or_show_plot(save, log_dir, f"{fig_name}.png")
 
     if save:
         save_path = os.path.join(log_dir, fig_name)

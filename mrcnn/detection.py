@@ -7,7 +7,7 @@ from mrcnn.proposal import apply_box_deltas
 from nms.nms_wrapper import nms
 
 
-def detection_layer2(config, rois, probs, deltas, image_meta):
+def to_image_domain(config, rois, probs, deltas, image_meta):
     """Refine classified proposals and filter overlaps and return final
     detections.
 
@@ -22,15 +22,15 @@ def detection_layer2(config, rois, probs, deltas, image_meta):
     Returns:
         detections: [N, (y1, x1, y2, x2, class_id, score)]
     """
-    refined_rois, class_ids, class_scores = detection_layer3(config, rois,
+    refined_rois, class_ids, class_scores = _to_image_domain(config, rois,
                                                              probs, deltas,
                                                              image_meta)
     return torch.cat((refined_rois,
-                     class_ids.unsqueeze(1).float(),
-                     class_scores.unsqueeze(1)), dim=1)
+                      class_ids.unsqueeze(1).float(),
+                      class_scores.unsqueeze(1)), dim=1)
 
 
-def detection_layer3(config, rois, probs, deltas, image_meta):
+def _to_image_domain(config, rois, probs, deltas, image_meta):
     # Currently only supports batchsize 1
     rois = rois.squeeze(0)
 
@@ -43,7 +43,7 @@ def detection_layer3(config, rois, probs, deltas, image_meta):
     # Class probability of the top class of each ROI
     # Class-specific bounding box deltas
     idx = torch.arange(class_ids.size()[0]).long()
-    idx = idx.to(mrcnn.config.DEVICE)
+    idx = idx.to(mrcnn.config.DEVICE).detach()
     class_scores = probs[idx, class_ids.detach()]
     deltas_specific = deltas[idx, class_ids[0].detach()]
 
@@ -61,7 +61,7 @@ def detection_layer3(config, rois, probs, deltas, image_meta):
     height, width = config.IMAGE_SHAPE[:2]
     scale = torch.from_numpy(np.array([height, width, height, width])).float()
     scale = scale.to(mrcnn.config.DEVICE)
-    refined_rois *= scale
+    refined_rois = refined_rois * scale
 
     # Clip boxes to image window
     refined_rois = utils.clip_to_window(window, refined_rois)
@@ -86,17 +86,15 @@ def detection_layer(config, rois, probs, deltas, image_meta):
 
     Returns detections shaped: [N, (y1, x1, y2, x2, class_id, score)]
     """
-    det_out = detection_layer3(config, rois, probs, deltas, image_meta)
+    det_out = _to_image_domain(config, rois, probs, deltas, image_meta)
     refined_rois, class_ids, class_scores = det_out
-
-    # TODO: Filter out boxes with zero area
 
     # Filter out background boxes
     keep_bool = class_ids > 0
 
     # Filter out low confidence boxes
     if config.DETECTION_MIN_CONFIDENCE:
-        keep_bool &= (class_scores >= config.DETECTION_MIN_CONFIDENCE)
+        keep_bool = keep & (class_scores >= config.DETECTION_MIN_CONFIDENCE)
     keep = torch.nonzero(keep_bool)[:, 0]
 
     # Apply per-class NMS
@@ -112,9 +110,9 @@ def detection_layer(config, rois, probs, deltas, image_meta):
         ix_scores, order = ix_scores.sort(descending=True, )
         ix_rois = ix_rois[order.detach(), :]
 
-        class_keep = nms(torch.cat((ix_rois, ix_scores.unsqueeze(1)),
-                                   dim=1).detach(),
-                         config.DETECTION_NMS_THRESHOLD)
+        class_keep = nms(
+            torch.cat((ix_rois, ix_scores.unsqueeze(1)), dim=1).detach(),
+            config.DETECTION_NMS_THRESHOLD)
 
         # Map indices
         class_keep = keep[ixs[order[class_keep].detach()].detach()]

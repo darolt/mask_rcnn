@@ -21,25 +21,31 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
     python samples/nuclei.py metric --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
 """
 
+import argparse
+import datetime
+import logging
 import matplotlib
 import matplotlib.pyplot as plt
-
-import os
-import torch
-import datetime
 import numpy as np
-import argparse
+import os
+import sys
 
+import torch
 from skimage.io import imread
 from imgaug import augmenters as iaa
+
 from mrcnn import visualize
 import mrcnn.config
+from mrcnn.config import ExecutionConfig
 from mrcnn import utils
 from mrcnn import dataset_handler
 from mrcnn import model as modellib
-from mrcnn import losses
+from mrcnn.losses import compute_map_loss
 from mrcnn.data_generator import load_image_gt
+from mrcnn.metrics import compute_map_metric
 
+
+logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 matplotlib.use('Agg')
 
 # Root directory of the project
@@ -89,9 +95,6 @@ VAL_IMAGE_IDS = [
     "cab4875269f44a701c5e58190a1d2f6fcb577ea79d842522dcab20ccb39b7ad2",
     "8ecdb93582b2d5270457b36651b62776256ade3aaa2d7432ae65c14f07432d49",
 ]
-############################################################
-#  Configurations
-############################################################
 
 
 class NucleusConfig(mrcnn.config.Config):
@@ -168,10 +171,6 @@ class InferenceConfig(NucleusConfig):
     DETECTION_MIN_CONFIDENCE = 0
     # Don't resize image during inference
     IMAGE_RESIZE_MODE = "pad64"
-
-############################################################
-#  Dataset
-############################################################
 
 
 class NucleusDatasetHandler(dataset_handler.DatasetHandler):
@@ -308,10 +307,6 @@ def mask_to_rle(image_id, mask, scores):
         lines.append("{}, {}".format(image_id, rle))
     return "\n".join(lines)
 
-############################################################
-#  Training
-############################################################
-
 
 def train(model, dataset_dir, subset):
     """Train the model."""
@@ -341,10 +336,6 @@ def train(model, dataset_dir, subset):
     print("Train all layers")
     model.train_model(dataset_train, dataset_val, config.LEARNING_RATE,
                       40, 'all', augmentation=augmentation)
-
-############################################################
-#  Detection
-############################################################
 
 
 def detect(model, dataset_dir, subset):
@@ -392,7 +383,7 @@ def detect(model, dataset_dir, subset):
 
 def compute_metric(model, dataset_dir, subset, config):
     """Run detection on dataset and compute Kaggle's 2018 Databowl metric."""
-    print("Running on {}".format(dataset_dir))
+    print(f"Running on {dataset_dir}")
 
     # Read dataset
     dataset_handler = NucleusDatasetHandler(dataset_dir, subset)
@@ -407,7 +398,7 @@ def compute_metric(model, dataset_dir, subset, config):
         gt_bboxes = torch.from_numpy(gt_bboxes).int()
         # Detect objects
         predictions, image_metas = model.detect([image])
-        precision = losses.compute_iou_loss2(gt_masks, predictions['masks'])
+        precision = compute_map_metric(gt_masks, predictions['masks'])
         precisions[idx] = precision
         print(f"mAP1 {precision}")
 
@@ -420,7 +411,7 @@ def compute_metric(model, dataset_dir, subset, config):
         gt_boxes = gt_boxes.to(mrcnn.config.DEVICE).to(torch.float32)
         gt_masks = gt_masks.permute(2, 0, 1)
         pred_masks = predictions['mrcnn_masks'].squeeze(0).to(mrcnn.config.DEVICE).float()
-        precision = losses.compute_iou_loss(
+        precision = compute_map_loss(
             gt_masks.to(mrcnn.config.DEVICE).float(),
             gt_boxes.to(mrcnn.config.DEVICE).float(),
             gt_class_ids,
@@ -430,10 +421,6 @@ def compute_metric(model, dataset_dir, subset, config):
         print(f"precision {precision}")
 
     print(f"final precision: {precisions.mean()}")
-
-############################################################
-#  Command Line
-############################################################
 
 
 if __name__ == '__main__':
@@ -480,6 +467,7 @@ if __name__ == '__main__':
         config = InferenceConfig()
     if config.GPU_COUNT:
         mrcnn.config.DEVICE = torch.device('cuda:' + str(args.dev))
+        ExecutionConfig.DEVICE = torch.device('cuda:' + str(args.dev))
     else:
         mrcnn.config.DEVICE = torch.device('cpu')
     config.display()

@@ -1,9 +1,13 @@
-import torch
-import numpy as np
-import mrcnn.config
+import logging
 
+import numpy as np
+import torch
+from torch.nn.functional import pad
+
+import mrcnn.config
 from mrcnn import utils
 from nms.nms_wrapper import nms
+
 
 ############################################################
 #  Proposal Layer
@@ -21,10 +25,10 @@ def apply_box_deltas(boxes, deltas):
     center_y = boxes[:, :, 0] + 0.5 * height
     center_x = boxes[:, :, 1] + 0.5 * width
     # Apply deltas
-    center_y += deltas[:, :, 0] * height
-    center_x += deltas[:, :, 1] * width
-    height *= torch.exp(deltas[:, :, 2])
-    width *= torch.exp(deltas[:, :, 3])
+    center_y = center_y + deltas[:, :, 0] * height
+    center_x = center_x + deltas[:, :, 1] * width
+    height = height * torch.exp(deltas[:, :, 2])
+    width = width * torch.exp(deltas[:, :, 3])
     # Convert back to y1, x1, y2, x2
     y1 = center_y - 0.5 * height
     x1 = center_x - 0.5 * width
@@ -34,12 +38,12 @@ def apply_box_deltas(boxes, deltas):
     return result
 
 
-def proposal_layer(inputs, proposal_count, nms_threshold, anchors,
-                   config=None):
+def proposal_layer(scores, deltas, proposal_count, nms_threshold,
+                   anchors, config=None):
     """Receives anchor scores and selects a subset to pass as proposals
     to the second stage. Filtering is done based on anchor scores and
     non-max suppression to remove overlaps. It also applies bounding
-    box refinment detals to anchors.
+    box refinment detals to anchors. Proposals are zero padded.
 
     Inputs:
         rpn_probs: [batch, anchors, (bg prob, fg prob)]
@@ -51,10 +55,8 @@ def proposal_layer(inputs, proposal_count, nms_threshold, anchors,
 
     # Box Scores. Use the foreground class confidence. [Batch, num_rois, 1]
     # TODO this only accepts one class
-    scores = inputs[0][:, :, 1]
+    scores = scores[:, :, 1]
 
-    # Box deltas [batch, num_rois, 4]
-    deltas = inputs[1]
     # TODO constant
     std_dev = torch.from_numpy(
                   np.reshape(config.RPN_BBOX_STD_DEV, [1, 4])
@@ -93,7 +95,12 @@ def proposal_layer(inputs, proposal_count, nms_threshold, anchors,
     for batch in range(boxes.size()[0]):
         keep = nms(nms_input[batch], nms_threshold)
         keep = keep[:proposal_count]
-        boxes_end.append(torch.unsqueeze(boxes[batch, keep, :], 0))
+        pad_size = proposal_count - keep.shape[0]
+        boxes_ = boxes[batch, keep, :]
+        if pad_size > 0:
+            logging.info(f"Proposal pad size after NMS is {pad_size}")
+            boxes_ = pad(boxes_, (0, 0, 0, pad_size), value=0)
+        boxes_end.append(boxes_.unsqueeze(0))
 
     boxes = torch.cat(boxes_end, 0)
     # boxes = boxes[keep, :]

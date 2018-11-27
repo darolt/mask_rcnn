@@ -30,7 +30,7 @@ class RPN(nn.Module):
         self.padding = SamePad2d(kernel_size=3, stride=self.anchor_stride)
         self.conv_shared = nn.Conv2d(self.depth, 512, kernel_size=3,
                                      stride=self.anchor_stride)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()
         self.conv_class = nn.Conv2d(512, 2 * anchors_per_location,
                                     kernel_size=1, stride=1)
         self.softmax = nn.Softmax(dim=2)
@@ -62,11 +62,3 @@ class RPN(nn.Module):
         rpn_bbox = rpn_bbox.view(x.size()[0], -1, 4)
 
         return [rpn_class_logits, rpn_probs, rpn_bbox]
-
-
-class RPNOutput():
-
-    def __init__(self, class_logits, probs, bbox):
-        self.class_logits = class_logits
-        self.probs = probs
-        self.bbox = bbox

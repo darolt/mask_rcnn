@@ -15,7 +15,7 @@ class Bottleneck(nn.Module):
         self.bn2 = nn.BatchNorm2d(planes, eps=0.001, momentum=0.01)
         self.conv3 = nn.Conv2d(planes, planes * 4, kernel_size=1)
         self.bn3 = nn.BatchNorm2d(planes * 4, eps=0.001, momentum=0.01)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()
         self.downsample = downsample
         self.stride = stride
 
@@ -37,7 +37,7 @@ class Bottleneck(nn.Module):
         if self.downsample is not None:
             residual = self.downsample(x)
 
-        out += residual
+        out = out + residual
         out = self.relu(out)
 
         return out
@@ -56,7 +56,7 @@ class ResNet(nn.Module):
         self.C1 = nn.Sequential(
             nn.Conv2d(3, 64, kernel_size=7, stride=2, padding=3).float(),
             nn.BatchNorm2d(64, eps=0.001, momentum=0.01).float(),
-            nn.ReLU(inplace=True).float(),
+            nn.ReLU().float(),
             SamePad2d(kernel_size=3, stride=2).float(),
             nn.MaxPool2d(kernel_size=3, stride=2).float(),
         )

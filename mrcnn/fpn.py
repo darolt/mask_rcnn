@@ -1,104 +1,10 @@
 import torch.nn as nn
 import torch.nn.functional as F
-import torch
+from torch import isnan
+
+
+from mrcnn.align import pyramid_roi_align
 from mrcnn.utils import SamePad2d
-from roialign.roi_align.crop_and_resize import CropAndResizeFunction
-import mrcnn.config
-
-############################################################
-#  ROIAlign Layer
-############################################################
-
-
-def pyramid_roi_align(inputs, pool_size, image_shape):
-    """Implements ROI Pooling on multiple levels of the feature pyramid.
-
-    Params:
-    - pool_size: [height, width] of the output pooled regions. Usually [7, 7]
-    - image_shape: [height, width, channels]. Shape of input image in pixels
-
-    Inputs:
-    - boxes: [batch, num_boxes, (y1, x1, y2, x2)] in normalized
-             coordinates.
-    - Feature maps: List of feature maps from different levels of the pyramid.
-                    Each is [batch, channels, height, width]
-
-    Output:
-    Pooled regions in the shape: [num_boxes, height, width, channels].
-    The width and height are those specific in the pool_shape in the layer
-    constructor.
-    """
-
-    # Currently only supports batchsize 1
-    for i in range(len(inputs)):
-        inputs[i] = inputs[i].squeeze(0)
-
-    # Crop boxes [batch, num_boxes, (y1, x1, y2, x2)] in normalized coords
-    boxes = inputs[0]
-
-    # Feature Maps. List of feature maps from different level of the
-    # feature pyramid. Each is [batch, height, width, channels]
-    feature_maps = inputs[1:]
-
-    # Assign each ROI to a level in the pyramid based on the ROI area.
-    y1, x1, y2, x2 = boxes.chunk(4, dim=1)
-    h = (y2 - y1).float()
-    w = (x2 - x1).float()
-
-    # Equation 1 in the Feature Pyramid Networks paper. Account for
-    # the fact that our coordinates are normalized here.
-    # e.g. a 224x224 ROI (in pixels) maps to P4
-    image_area = torch.tensor([float(image_shape[0]*image_shape[1])],
-                              dtype=torch.float32, device=mrcnn.config.DEVICE)
-    roi_level = 4 + torch.log2(torch.sqrt(h*w)/(224.0/torch.sqrt(image_area)))
-    roi_level = roi_level.round().int()
-    roi_level = roi_level.clamp(2, 5)
-
-    # Loop through levels and apply ROI pooling to each. P2 to P5.
-    pooled = []
-    box_to_level = []
-    for i, level in enumerate(range(2, 6)):
-        ix = roi_level == level
-        if not ix.any():
-            continue
-        ix = torch.nonzero(ix)[:, 0]
-        level_boxes = boxes[ix.detach(), :]
-
-        # Keep track of which box is mapped to which level
-        box_to_level.append(ix.detach())
-
-        # Stop gradient propogation to ROI proposals
-        level_boxes = level_boxes.detach()
-
-        # Crop and Resize
-        # From Mask R-CNN paper: "We sample four regular locations, so
-        # that we can evaluate either max or average pooling. In fact,
-        # interpolating only a single value at each bin center (without
-        # pooling) is nearly as effective."
-        #
-        # Here we use the simplified approach of a single value per bin,
-        # which is how it's done in tf.crop_and_resize()
-        # Result: [batch * num_boxes, pool_height, pool_width, channels]
-        ind = torch.zeros(level_boxes.size()[0], dtype=torch.int,
-                          device=mrcnn.config.DEVICE)
-        # CropAndResizeFunction needs batch dimension
-        feature_maps[i] = feature_maps[i].unsqueeze(0)
-        pooled_features = (CropAndResizeFunction(pool_size, pool_size, 0)
-                           (feature_maps[i], level_boxes, ind))
-        pooled.append(pooled_features)
-
-    # Pack pooled features into one tensor
-    pooled = torch.cat(pooled, dim=0)
-
-    # Pack box_to_level mapping into one array and add another
-    # column representing the order of pooled boxes
-    box_to_level = torch.cat(box_to_level, dim=0)
-
-    # Rearrange pooled features to match the order of the original boxes
-    _, box_to_level = torch.sort(box_to_level)
-    pooled = pooled[box_to_level, :, :]
-
-    return pooled
 
 ############################################################
 #  FPN Graph
@@ -158,6 +64,7 @@ class FPN(nn.Module):
         )
 
     def forward(self, x):
+        assert isnan(x).sum() == 0, 'Molded images contain NaNs.'
         x = self.C1(x)
         c2_out = self.C2(x)
         c3_out = self.C3(c2_out)
@@ -169,13 +76,18 @@ class FPN(nn.Module):
         p2_out = self.P2_conv1(c2_out) + F.upsample(p3_out, scale_factor=2)
 
         p5_out = self.P5_conv2(p5_out)
+        assert isnan(p5_out).sum() == 0, 'Molded images contain NaNs.'
         p4_out = self.P4_conv2(p4_out)
+        assert isnan(p4_out).sum() == 0, 'Molded images contain NaNs.'
         p3_out = self.P3_conv2(p3_out)
+        assert isnan(p3_out).sum() == 0, 'Molded images contain NaNs.'
         p2_out = self.P2_conv2(p2_out)
+        assert isnan(p2_out).sum() == 0, 'Molded images contain NaNs.'
 
         # P6 is used for the 5th anchor scale in RPN. Generated by
         # subsampling from P5 with stride of 2.
         p6_out = self.P6(p5_out)
+        assert isnan(p6_out).sum() == 0, 'Molded images contain NaNs.'
 
         return [p2_out, p3_out, p4_out, p5_out, p6_out]
 
@@ -204,7 +116,7 @@ class Classifier(nn.Module):
         self.linear_bbox = nn.Linear(1024, num_classes * 4)
 
     def forward(self, x, rois):
-        x = pyramid_roi_align([rois]+x, self.pool_size, self.image_shape)
+        x = pyramid_roi_align(rois, x, self.pool_size, self.image_shape)
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
@@ -217,12 +129,13 @@ class Classifier(nn.Module):
         mrcnn_probs = self.softmax(mrcnn_class_logits)
 
         mrcnn_bbox = self.linear_bbox(x)
-        mrcnn_bbox = mrcnn_bbox.view(mrcnn_bbox.size()[0], -1, 4)
+        mrcnn_bbox = mrcnn_bbox.view(mrcnn_bbox.shape[0], -1, 4)
 
         return [mrcnn_class_logits, mrcnn_probs, mrcnn_bbox]
 
 
 class Mask(nn.Module):
+    """Head of the FPN that generates masks."""
     def __init__(self, depth, pool_size, image_shape, num_classes):
         super(Mask, self).__init__()
         self.depth = depth
@@ -244,7 +157,7 @@ class Mask(nn.Module):
         self.relu = nn.ReLU(inplace=True)
 
     def forward(self, x, rois):
-        x = pyramid_roi_align([rois] + x, self.pool_size, self.image_shape)
+        x = pyramid_roi_align(rois, x, self.pool_size, self.image_shape)
         x = self.conv1(self.padding(x))
         x = self.bn1(x)
         x = self.relu(x)
@@ -261,5 +174,5 @@ class Mask(nn.Module):
         x = self.relu(x)
         x = self.conv5(x)
         x = self.sigmoid(x)
-
+        assert isnan(x).sum() == 0, 'Mask contains NaNs.'
         return x
