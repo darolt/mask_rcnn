@@ -3,8 +3,8 @@ import torch.nn.functional as F
 from torch import isnan
 
 
-from mrcnn.align import pyramid_roi_align
-from mrcnn.utils import SamePad2d
+from mrcnn.models.components.align import pyramid_roi_align
+from mrcnn.utils.utils import SamePad2d
 
 ############################################################
 #  FPN Graph

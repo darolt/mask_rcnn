@@ -32,15 +32,15 @@ import torch
 from skimage.io import imread
 from imgaug import augmenters as iaa
 
-from mrcnn import visualize
+from mrcnn.utils import visualize
 import mrcnn.config
 from mrcnn.config import ExecutionConfig as ExeCfg
-from mrcnn import utils
-from mrcnn.dataset_handler import DatasetHandler
-from mrcnn import model as modellib
-from mrcnn.losses import compute_map_loss
-from mrcnn.data_generator import load_image_gt
-from mrcnn.metrics import compute_map_metric
+from mrcnn.utils import utils
+from mrcnn.data.dataset_handler import DatasetHandler
+from mrcnn.data.data_generator import load_image_gt
+from mrcnn.models import model as modellib
+from mrcnn.functions.losses import compute_map_loss
+from mrcnn.functions.metrics import compute_map_metric
 
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
@@ -459,7 +459,7 @@ if __name__ == '__main__':
     print(f"Debug function: {args.debug_function}")
 
     if args.debug and torch.cuda.device_count() > 0:
-        from mrcnn.gpu_profile import trace_calls
+        from tools.gpu_profile import trace_calls
         os.environ['GPU_DEBUG'] = str(args.dev)
         os.environ['TRACE_INTO'] = args.debug_function
         sys.settrace(trace_calls)

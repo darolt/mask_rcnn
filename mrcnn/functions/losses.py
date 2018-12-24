@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import torch
 
 from mrcnn.config import ExecutionConfig as ExeCfg
-from mrcnn.utils import unmold_boxes_x, unmold_detections_x, register_hook
+from mrcnn.utils.utils import unmold_boxes_x, unmold_detections_x
 
 
 class Losses():
@@ -253,8 +253,6 @@ def compute_map_loss(gt_masks, gt_boxes, gt_class_ids, image_metas,
             gt_boxes[:N], gt_class_ids[:N], gt_masks[:N], image_shape[:2],
             window)
 
-    # register_hook(pred_boxes, 'pred_boxes:')
-    # register_hook(pred_masks[0], 'pred_masks:')
     ious = _compute_ious(gt_boxes, gt_masks, pred_boxes, pred_masks)
     precision = _compute_map(ious)
     # assert 0 <= precision <= 1, \
@@ -392,10 +390,8 @@ def _compute_intersection(pred_mask, gt_mask, pred_inter_idx, gt_inter_idx):
 def _compute_factor(pred_inter_idx):
     """Returns a value inside the range [-1, 0]. The higher the value, closer
     are the boxes."""
-    register_hook(pred_inter_idx, 'pred_inter_idx:')
     factor = pred_inter_idx.sum().to(ExeCfg.DEVICE)
     factor = (factor/100).sigmoid() - 1.0
-    register_hook(factor, 'factor:')
 
     assert (factor <= 0).byte().all(), 'Factor cannot be greater than 0.'
     assert (factor >= -1).byte().all(), 'Factor cannot be less than -1.'
@@ -470,7 +466,6 @@ def _compute_ious(gt_boxes, gt_masks, pred_boxes, pred_masks):
             and predicted masks.
     """
     # compute IOUs
-    register_hook(pred_boxes, 'pred_boxes: ')
     ious = torch.zeros((len(gt_masks), len(pred_masks)), dtype=torch.float)
     logging.info(f"{len(gt_masks)} x {len(pred_masks)}")
     for gt_idx, gt_box in enumerate(gt_boxes):
@@ -492,10 +487,8 @@ def _compute_map(ious):
     """Compute mean average precision."""
     thresholds = torch.arange(0.5, 1.0, 0.05)
     precisions = torch.empty_like(thresholds, device=ExeCfg.DEVICE)
-    register_hook(ious, 'ious:')
     for thresh_idx, threshold in enumerate(thresholds):
         hits = ((ious - threshold)*MAGNIFIER).sigmoid()
-        register_hook(hits, 'hits_thresh:')
         gt_sum = ((hits.sum(dim=0) - 0.5)*MAGNIFIER).sigmoid()
         pred_sum = ((hits.sum(dim=1) - 0.5)*MAGNIFIER).sigmoid()
 
@@ -503,13 +496,9 @@ def _compute_map(ious):
         overpred = gt_sum.sum() - tp
         if overpred > 0.5:
             print(overpred)
-        # register_hook(tp, 'tp_thresh:')
         fp = (1 - gt_sum).sum()
-        # register_hook(fp, 'fp_thresh:')
         fn = (1 - pred_sum).sum()
-        # register_hook(fn, 'fn_thresh:')
         precisions[thresh_idx] = (tp/(tp + fp + fn)) - overpred
-        # register_hook(precisions[thresh_idx], 'precision_thresh:')
 
     # average precisions
     return precisions.mean()

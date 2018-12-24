@@ -5,7 +5,7 @@ import torch
 import torch.nn.functional as F
 
 from mrcnn.config import ExecutionConfig as ExeCfg
-from mrcnn import utils
+from mrcnn.utils import utils
 from nms.nms_wrapper import nms
 
 
@@ -74,8 +74,8 @@ def _apply_nms(boxes, scores, nms_threshold, proposal_count):
         pad_size = proposal_count - keep.shape[0]
         boxes_ = boxes[img_idx, keep, :]
         if pad_size > 0:
-            logging.info(f"Proposal pad size after NMS is {pad_size}")
-            boxes_ = F.pad(boxes_, (0, 0, 0, pad_size.item()), value=0)
+            logging.debug(f"Proposal pad size after NMS is {pad_size}")
+            boxes_ = F.pad(boxes_, (0, 0, 0, pad_size), value=0)
         boxes_end.append(boxes_.unsqueeze(0))
 
     boxes = torch.cat(boxes_end, 0)

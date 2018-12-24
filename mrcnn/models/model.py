@@ -19,21 +19,19 @@ import torch.optim as optim
 import torch.utils.data
 
 from mrcnn.config import ExecutionConfig as ExeCfg
-from mrcnn import utils
-from mrcnn.anchors import generate_pyramid_anchors
-from mrcnn.utils import MRCNNOutput, RPNOutput, RPNTarget,\
-                        MRCNNGroundTruth, get_empty_mrcnn_out,\
-                        register_hook
-from mrcnn.proposal import proposal_layer
-from mrcnn.detection import detection_layer, to_input_domain
-from mrcnn.data_generator import DataGenerator
-from mrcnn.losses import Losses, compute_mrcnn_losses, compute_map_loss,\
-                         compute_rpn_losses, compute_losses
-from mrcnn import visualize
-from mrcnn.resnet import ResNet
-from mrcnn.rpn import RPN
-from mrcnn.fpn import FPN, Classifier, Mask
-from mrcnn.detection_target import detection_target_layer
+from mrcnn.utils import utils
+from mrcnn.models.components.anchors import generate_pyramid_anchors
+from mrcnn.utils.utils import MRCNNOutput, RPNOutput, RPNTarget,\
+                              MRCNNGroundTruth, get_empty_mrcnn_out
+from mrcnn.models.components.proposal import proposal_layer
+from mrcnn.models.components.detection import detection_layer
+from mrcnn.data.data_generator import DataGenerator
+from mrcnn.functions.losses import Losses, compute_losses
+from mrcnn.utils import visualize
+from mrcnn.models.components.resnet import ResNet
+from mrcnn.models.components.rpn import RPN
+from mrcnn.models.components.fpn import FPN, Classifier, Mask
+from mrcnn.models.components.detection_target import detection_target_layer
 
 
 class MaskRCNN(nn.Module):
@@ -360,7 +358,6 @@ class MaskRCNN(nn.Module):
             return self._inference(mrcnn_feature_maps, rpn_rois, image_metas)
         elif mode == 'training':
             # Normalize coordinates
-            gt_boxes = gt.boxes
             gt.boxes = gt.boxes / self.scale
 
             # Generate detection targets
@@ -368,7 +365,6 @@ class MaskRCNN(nn.Module):
             # Note that proposal class IDs, gt_boxes, and gt_masks are zero
             # padded. Equally, returned rois and targets are zero padded.
             mrcnn_targets, mrcnn_outs = [], []
-            precisions = torch.zeros((batch_size), dtype=torch.float)
             for img_idx in range(0, batch_size):
                 with torch.no_grad():
                     rois_, mrcnn_target = detection_target_layer(
@@ -384,7 +380,7 @@ class MaskRCNN(nn.Module):
                     rois_ = rois_.unsqueeze(0)
                     mrcnn_feature_maps_batch = [x[img_idx].unsqueeze(0).detach()
                                                 for x in mrcnn_feature_maps]
-                    mrcnn_class_logits_, mrcnn_class, mrcnn_deltas_ = \
+                    mrcnn_class_logits_, _, mrcnn_deltas_ = \
                         self.classifier(mrcnn_feature_maps_batch, rois_)
 
                     # Create masks
@@ -393,31 +389,10 @@ class MaskRCNN(nn.Module):
                     mrcnn_out = MRCNNOutput(mrcnn_class_logits_,
                                             mrcnn_deltas_, mrcnn_mask_)
 
-                # mrcnn_outs.append(mrcnn_out)
-                # mrcnn_targets.append(mrcnn_target)
+                mrcnn_outs.append(mrcnn_out)
+                mrcnn_targets.append(mrcnn_target)
 
-                # prepare mrcnn_out to mAP
-                if rois_.nelement() == 0:
-                    continue
-                if mrcnn_out.class_logits.nelement() != 0:
-                    detections = to_input_domain(
-                        self.config, rois_, mrcnn_class, mrcnn_out.deltas,
-                        image_metas)
-
-                    # call mAP (move to loss)
-                    try:
-                        precision = compute_map_loss(
-                            gt.masks[img_idx], gt_boxes[img_idx],
-                            gt.class_ids[img_idx],
-                            image_metas[img_idx],
-                            detections,
-                            mrcnn_out.masks.permute(0, 2, 3, 1))
-                        logging.debug(f"precision is {precision}")
-                        precisions[img_idx] = precision
-                    except utils.NoPositiveAreaError as error:
-                        logging.info(str(error))
-
-            return rpn_out, mrcnn_targets, mrcnn_outs, precisions.mean()
+            return rpn_out, mrcnn_targets, mrcnn_outs
 
     def _get_generators(self, train_dataset, val_dataset, augmentation):
         train_set = DataGenerator(train_dataset, self.config,
@@ -519,46 +494,35 @@ class MaskRCNN(nn.Module):
             optimizer.zero_grad()
 
             # Run object detection
-            rpn_out, _, _, precision = \
+            rpn_out, mrcnn_targets, mrcnn_outs = \
                 self._predict(images, image_metas, gt=gt)
-            register_hook(precision, 'precision:')
-            precisions.append(precision.item())
             del images, image_metas, gt
 
             # Compute losses
-            # mrcnn_losses = compute_mrcnn_losses(mrcnn_targets, mrcnn_outs)
-
-            rpn_losses = compute_rpn_losses(rpn_target, rpn_out)
-            del rpn_target, rpn_out
+            losses = compute_losses(rpn_target, rpn_out,
+                                    mrcnn_targets, mrcnn_outs)
+            del rpn_target, rpn_out, mrcnn_targets, mrcnn_outs
 
             # Backpropagation
-            precision_compl = 1.0 - precision
-            map_rpn = precision_compl.to(ExeCfg.DEVICE)  # + rpn_losses.total
-                # mrcnn_losses.mrcnn_class
-            map_rpn.backward()
-            logging.info(f"final precision: {precision}")
-            del precision_compl, map_rpn, precision
+            losses.total.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), 5.0)
 
             optimizer.step()
 
             # Progress
-            losses_epoch = rpn_losses  # + mrcnn_losses
-            utils.printProgressBar(step + 1, steps, losses_epoch)
-            # del mrcnn_losses
+            utils.printProgressBar(step + 1, steps, losses)
 
             # Statistics
-            losses_sum = losses_sum + losses_epoch.item()/steps
+            losses_sum = losses_sum + losses.item()/steps
 
-            del rpn_losses, losses_epoch
+            del losses
 
         return losses_sum, sum(precisions)/len(precisions)
 
     def validation_epoch(self, datagenerator, steps):
         """Validation step. Usually called with torch.no_grad()."""
         losses_sum = Losses()
-        predictions = []
 
         for step, inputs in enumerate(datagenerator):
             # Break after 'steps' steps
@@ -570,19 +534,18 @@ class MaskRCNN(nn.Module):
 
             # Run object detection
             outputs = self._predict(images, image_metas, gt=gt)
-            predictions.append(outputs[-1])
 
             # Compute losses
-            losses_epoch = compute_losses(rpn_target, *outputs[:-1])
+            losses = compute_losses(rpn_target, *outputs[:-1])
 
             # Progress
-            utils.printProgressBar(step + 1, steps, losses_epoch)
+            utils.printProgressBar(step + 1, steps, losses)
 
             # Statistics
-            losses_sum = losses_sum + losses_epoch.item()/steps
-            del losses_epoch
+            losses_sum = losses_sum + losses.item()/steps
+            del losses
 
-        return losses_sum, sum(predictions)/len(predictions)
+        return losses_sum
 
     @staticmethod
     def _prepare_inputs(inputs):

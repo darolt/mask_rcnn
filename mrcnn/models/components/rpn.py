@@ -1,5 +1,6 @@
 from torch import nn
-from mrcnn.utils import SamePad2d
+
+from mrcnn.utils.utils import SamePad2d
 
 ############################################################
 #  Region Proposal Network

@@ -2,7 +2,7 @@ import numpy as np
 import torch
 
 from mrcnn.config import ExecutionConfig as ExeCfg
-from mrcnn import utils
+from mrcnn.utils import utils
 from nms.nms_wrapper import nms
 
 
@@ -43,7 +43,6 @@ def _to_input_domain(config, rois, probs, deltas, image_meta):
     idx = torch.arange(class_ids.size()[0]).long().to(ExeCfg.DEVICE)
 
     class_scores = probs[idx.detach(), class_ids.detach()]
-    utils.register_hook(class_scores, 'class_scores:')
     deltas_specific = deltas[idx.detach(), class_ids[0].detach()]
 
     # Apply bounding box deltas
@@ -60,14 +59,10 @@ def _to_input_domain(config, rois, probs, deltas, image_meta):
     scale = scale.to(ExeCfg.DEVICE).float()
 
     refined_rois = refined_rois * scale
-    utils.register_hook(refined_rois, 'refined_rois1:')
     # Clip boxes to image window
     refined_rois = utils.clip_to_window(window, refined_rois)
 
     # Round and cast to int since we're dealing with pixels now
-    utils.register_hook(refined_rois, 'refined_rois2:')
-    # refined_rois = torch.round(refined_rois)
-    utils.register_hook(refined_rois, 'refined_rois3:')
     return refined_rois, class_ids, class_scores
 
 

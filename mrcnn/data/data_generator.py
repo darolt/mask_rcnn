@@ -1,9 +1,10 @@
 import imgaug
 import torch
+from torch.utils.data import Dataset
 import numpy as np
 
-from mrcnn import utils
-from mrcnn import anchors
+from mrcnn.utils import utils
+from mrcnn.models.components import anchors
 
 
 def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
@@ -45,9 +46,9 @@ def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
                            "Fliplr", "Flipud", "CropAndPad",
                            "Affine", "PiecewiseAffine"]
 
-        def hook(images, augmenter, parents, default):
+        def hook(images, augmenter, parents, default):  # pylint: disable=W0613
             """Determines which augmenters to apply to masks."""
-            return (augmenter.__class__.__name__ in MASK_AUGMENTERS)
+            return augmenter.__class__.__name__ in MASK_AUGMENTERS
 
         # Store shapes before augmentation to compare
         image_shape = image.shape
@@ -204,7 +205,7 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     return rpn_match, rpn_bbox
 
 
-class DataGenerator(torch.utils.data.Dataset):
+class DataGenerator(Dataset):
     def __init__(self, dataset_handler, config, augmentation=None):
         """A generator that returns images and corresponding target class ids,
             bounding box deltas, and masks.

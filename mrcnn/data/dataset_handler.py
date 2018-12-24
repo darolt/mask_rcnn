@@ -1,7 +1,6 @@
+import numpy as np
 import skimage.color
 import skimage.io
-
-import numpy as np
 
 
 class DatasetHandler(object):

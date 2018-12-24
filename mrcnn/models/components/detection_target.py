@@ -4,8 +4,8 @@ import torch
 
 from roialign.roi_align.crop_and_resize import CropAndResizeFunction
 from mrcnn.config import ExecutionConfig as ExeCfg
-from mrcnn import utils
-from mrcnn.utils import MRCNNTarget
+from mrcnn.utils import utils
+from mrcnn.utils.utils import MRCNNTarget
 
 
 def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks,
@@ -106,8 +106,8 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks,
     # 2. Negative ROIs are those with < 0.5 with every GT box. Skip crowds.
     negative_roi_bool = roi_iou_max < 0.5
     negative_roi_bool = negative_roi_bool & no_crowd_bool
-    logging.info(f"pos: {positive_roi_bool.sum()}, "
-                 f"neg: {negative_roi_bool.sum()}")
+    logging.debug(f"pos: {positive_roi_bool.sum()}, "
+                  f"neg: {negative_roi_bool.sum()}")
     # Negative ROIs. Add enough to maintain positive:negative ratio.
     if torch.nonzero(negative_roi_bool).nelement() != 0 and positive_count > 0:
         negative_indices = torch.nonzero(negative_roi_bool)[:, 0]

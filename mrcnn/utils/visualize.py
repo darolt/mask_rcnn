@@ -7,19 +7,20 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import os
-import sys
-import random
-import itertools
 import colorsys
-import numpy as np
-import matplotlib.pyplot as plt
-import IPython.display
+import itertools
+import os
+import random
+import sys
 
-from mrcnn import utils
+import numpy as np
+import IPython.display
 from skimage.measure import find_contours
-from matplotlib import patches,  lines
+import matplotlib.pyplot as plt
+from matplotlib import patches, lines
 from matplotlib.patches import Polygon
+
+from mrcnn.utils import utils
 
 # Root directory of the project
 ROOT_DIR = os.path.abspath("../")
@@ -30,6 +31,7 @@ sys.path.append(ROOT_DIR)  # To find local version of the library
 ############################################################
 #  Visualization
 ############################################################
+
 
 def display_images(images, titles=None, cols=4, cmap=None, norm=None,
                    interpolation=None):

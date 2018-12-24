@@ -7,18 +7,18 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import random
 import math
-
-import scipy.misc
-import scipy.ndimage
-import torch
-import skimage.transform
-import urllib.request
 import shutil
+import random
 import warnings
+import urllib.request
 
 import numpy as np
+import scipy.misc
+import scipy.ndimage
+import skimage.transform
+import torch
+
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -380,13 +380,10 @@ def unmold_boxes_x(boxes, class_ids, masks, image_shape, window, scores=None):
     # Extract boxes, class_ids, scores, and class-specific masks
     class_ids = class_ids.to(torch.long)
 
-    register_hook(boxes, 'boxes1:')
     image_shape2 = (image_shape[0], image_shape[1])
     boxes = to_img_domain(boxes, window, image_shape)
-    register_hook(boxes, 'boxes2:')
 
     boxes, _, masks, _ = remove_zero_area(boxes, class_ids, masks)
-    register_hook(boxes, 'boxes3:')
     full_masks = unmold_masks_x(masks, boxes, image_shape2)
 
     return boxes, full_masks
