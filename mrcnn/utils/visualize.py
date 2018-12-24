@@ -501,8 +501,7 @@ def display_weight_stats(model):
     display_table(table)
 
 
-def plot_losses(losses, val_losses, precisions=None, val_precisions=None,
-                save=True, log_dir=None):
+def plot_losses(losses, val_losses, save=True, log_dir=None):
 
     plot_names = ['total', 'rpn_class', 'rpn_bbox', 'mrcnn_class',
                   'mrcnn_bbox', 'mrcnn_mask']
@@ -514,10 +513,6 @@ def plot_losses(losses, val_losses, precisions=None, val_precisions=None,
         losses_val = np.array(losses_val)
         _save_or_show_plot(f"{plot_name}_loss", losses_train, losses_val, save,
                            log_dir)
-
-    if precisions:
-        _save_or_show_plot(f"precision_loss", precisions[:],
-                           val_precisions[:], save, log_dir)
 
 
 def _save_or_show_plot(fig_name, train, val, save, log_dir):

@@ -448,29 +448,23 @@ class MaskRCNN(nn.Module):
             {'params': trainables_only_bn}
         ], lr=learning_rate, momentum=self.config.LEARNING_MOMENTUM)
 
-        predictions = []
-        val_predictions = []
         for epoch in range(self.epoch+1, epochs+1):
             utils.log("Epoch {}/{}.".format(epoch, epochs))
 
             # Training
-            train_losses, preds = self.train_epoch(
+            train_losses = self.train_epoch(
                 train_generator, optimizer, self.config.STEPS_PER_EPOCH)
-            predictions.append(preds)
 
             # Validation
             with torch.no_grad():
-                val_losses, preds = self.validation_epoch(
+                val_losses = self.validation_epoch(
                     val_generator, self.config.VALIDATION_STEPS)
-                val_predictions.append(preds)
 
             # Statistics
             self.loss_history.append(train_losses)
             self.val_loss_history.append(val_losses)
             visualize.plot_losses(self.loss_history,
                                   self.val_loss_history,
-                                  predictions,
-                                  val_predictions,
                                   log_dir=self.log_dir)
 
             # Save model
@@ -480,7 +474,6 @@ class MaskRCNN(nn.Module):
 
     def train_epoch(self, datagenerator, optimizer, steps):
         losses_sum = Losses()
-        precisions = []
 
         for step, inputs in enumerate(datagenerator):
             if step == steps:
@@ -518,7 +511,7 @@ class MaskRCNN(nn.Module):
 
             del losses
 
-        return losses_sum, sum(precisions)/len(precisions)
+        return losses_sum
 
     def validation_epoch(self, datagenerator, steps):
         """Validation step. Usually called with torch.no_grad()."""
@@ -536,7 +529,7 @@ class MaskRCNN(nn.Module):
             outputs = self._predict(images, image_metas, gt=gt)
 
             # Compute losses
-            losses = compute_losses(rpn_target, *outputs[:-1])
+            losses = compute_losses(rpn_target, *outputs)
 
             # Progress
             utils.printProgressBar(step + 1, steps, losses)
