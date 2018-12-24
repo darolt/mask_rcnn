@@ -7,9 +7,11 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
+from abc import ABC
 import math
-import numpy as np
 import os
+
+import numpy as np
 import torch
 
 # set default device. Override this if GPU is needed
@@ -18,9 +20,7 @@ DEVICE = torch.device('cpu')
 # Base Configuration Class
 # Don't use this class directly. Instead, sub-class it and override
 # the configurations you need to change.
-
-
-class Config(object):
+class Config(ABC, object):
     """Base configuration class. For custom configurations, create a
     sub-class that inherits from this one and override properties
     that need to be changed.
@@ -76,11 +76,14 @@ class Config(object):
     RPN_ANCHOR_STRIDE = 1
 
     # Non-max suppression threshold to filter RPN proposals.
-    # You can reduce this during training to generate more propsals.
+    # You can reduce this during training to generate more proposals.
     RPN_NMS_THRESHOLD = 0.7
 
     # How many anchors per image to use for RPN training
     RPN_TRAIN_ANCHORS_PER_IMAGE = 256
+
+    # Limit top anchors by score
+    PRE_NMS_LIMIT = 6000
 
     # ROIs kept after non-maximum supression (training and inference)
     POST_NMS_ROIS_TRAINING = 2000
@@ -181,6 +184,10 @@ class Config(object):
                             "and upscaling. For example, use 256, 320, 384, "
                             "448, 512, ... etc. ")
 
+        Config.RPN_BBOX_STD_DEV = torch.from_numpy(
+            np.reshape(Config.RPN_BBOX_STD_DEV, [1, 4])
+            ).float()
+
     def display(self):
         """Display Configuration values."""
         print("\nConfigurations:")
@@ -190,6 +197,5 @@ class Config(object):
         print("\n")
 
 
-class ExecutionConfig():
+class ExecutionConfig(ABC):
     DEVICE = torch.device('cpu')
-    

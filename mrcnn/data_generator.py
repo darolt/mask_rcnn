@@ -198,7 +198,7 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
             np.log(gt_w / a_w),
         ]
         # Normalize
-        rpn_bbox[ix] /= config.RPN_BBOX_STD_DEV
+        rpn_bbox[ix] /= config.RPN_BBOX_STD_DEV.squeeze(0)
         ix += 1
 
     return rpn_match, rpn_bbox

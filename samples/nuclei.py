@@ -24,21 +24,19 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 import argparse
 import datetime
 import logging
-import matplotlib
-import matplotlib.pyplot as plt
-import numpy as np
 import os
 import sys
 
+import numpy as np
 import torch
 from skimage.io import imread
 from imgaug import augmenters as iaa
 
 from mrcnn import visualize
 import mrcnn.config
-from mrcnn.config import ExecutionConfig
+from mrcnn.config import ExecutionConfig as ExeCfg
 from mrcnn import utils
-from mrcnn import dataset_handler
+from mrcnn.dataset_handler import DatasetHandler
 from mrcnn import model as modellib
 from mrcnn.losses import compute_map_loss
 from mrcnn.data_generator import load_image_gt
@@ -46,7 +44,6 @@ from mrcnn.metrics import compute_map_metric
 
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
-matplotlib.use('Agg')
 
 # Root directory of the project
 ROOT_DIR = os.getcwd()
@@ -141,7 +138,7 @@ class NucleusConfig(mrcnn.config.Config):
     RPN_TRAIN_ANCHORS_PER_IMAGE = 64
 
     # Image mean (RGB)
-    # TODO calculate this on training set
+    # TODO calculate this on training set (first epoch)
     MEAN_PIXEL = np.array([43.53, 39.56, 48.22])
 
     # If enabled, resizes instance masks to a smaller size to reduce
@@ -173,7 +170,7 @@ class InferenceConfig(NucleusConfig):
     IMAGE_RESIZE_MODE = "pad64"
 
 
-class NucleusDatasetHandler(dataset_handler.DatasetHandler):
+class NucleusDatasetHandler(DatasetHandler):
     """Handles nuclei dataset.
     """
 
@@ -340,6 +337,9 @@ def train(model, dataset_dir, subset):
 
 def detect(model, dataset_dir, subset):
     """Run detection on images in the given directory."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
     print("Running on {}".format(dataset_dir))
 
     # Create directory
@@ -388,7 +388,7 @@ def compute_metric(model, dataset_dir, subset, config):
     # Read dataset
     dataset_handler = NucleusDatasetHandler(dataset_dir, subset)
     # Load over images
-    precisions = torch.empty((len(dataset_handler)), device=mrcnn.config.DEVICE)
+    precisions = torch.empty((len(dataset_handler)), device=ExeCfg.DEVICE)
     for idx, image_id in enumerate(dataset_handler.image_ids):
         # Load image and run detection
         image = dataset_handler.load_image(image_id)
@@ -402,31 +402,33 @@ def compute_metric(model, dataset_dir, subset, config):
         precisions[idx] = precision
         print(f"mAP1 {precision}")
 
-        _, image_meta, gt_class_ids, gt_boxes, gt_masks = load_image_gt(
+        _, _, gt_class_ids, gt_boxes, gt_masks = load_image_gt(
             dataset_handler, config, image_id, use_mini_mask=True)
 
         gt_boxes = torch.from_numpy(gt_boxes)
-        gt_class_ids = torch.from_numpy(gt_class_ids).to(mrcnn.config.DEVICE)
+        gt_class_ids = torch.from_numpy(gt_class_ids).to(ExeCfg.DEVICE)
         gt_masks = torch.from_numpy(gt_masks.astype(np.uint8))
-        gt_boxes = gt_boxes.to(mrcnn.config.DEVICE).to(torch.float32)
+        gt_boxes = gt_boxes.to(ExeCfg.DEVICE).to(torch.float32)
         gt_masks = gt_masks.permute(2, 0, 1)
-        pred_masks = predictions['mrcnn_masks'].squeeze(0).to(mrcnn.config.DEVICE).float()
+        pred_masks = predictions['mrcnn_masks'].squeeze(0).to(ExeCfg.DEVICE).float()
         precision = compute_map_loss(
-            gt_masks.to(mrcnn.config.DEVICE).float(),
-            gt_boxes.to(mrcnn.config.DEVICE).float(),
+            gt_masks.to(ExeCfg.DEVICE).float(),
+            gt_boxes.to(ExeCfg.DEVICE).float(),
             gt_class_ids,
             image_metas.squeeze(0),
-            predictions['detections'].squeeze(0).to(mrcnn.config.DEVICE).float(),
+            predictions['detections'].squeeze(0).to(ExeCfg.DEVICE).float(),
             pred_masks)
         print(f"precision {precision}")
 
     print(f"final precision: {precisions.mean()}")
 
 
+DESCR = "Train Mask R-CNN on Kaggle's Data Science Bowl 2018 dataset."
+
+
 if __name__ == '__main__':
     # Parse command line arguments
-    descr = "Train Mask R-CNN on Kaggle's Data Science Bowl 2018 dataset."
-    parser = argparse.ArgumentParser(description=descr)
+    parser = argparse.ArgumentParser(description=DESCR)  # pylint: disable=C0103
     parser.add_argument("command",
                         metavar="<command>",
                         help="'train' or 'detect'")
@@ -440,34 +442,39 @@ if __name__ == '__main__':
                         default=DEFAULT_LOGS_DIR,
                         metavar="/path/to/logs/",
                         help='Logs and checkpoints directory (default=logs/)')
-    parser.add_argument('--debug', required=False,
-                        help='Turn on debugger.')
     parser.add_argument('--dev', required=False,
                         default=0, type=int,
                         help='CUDA current device.')
-    args = parser.parse_args()
+    parser.add_argument('--debug', required=False,
+                        type=int, help='Turn on GPU profiler.')
+    parser.add_argument('--debug_function', required=False,
+                        help='name of the function to be debbuged.')
+    args = parser.parse_args()  # pylint: disable=C0103
 
-    print("Command: ", args.command)
-    print("Model: ", args.model)
-    print("Dataset: ", args.dataset)
-    print("Logs: ", args.logs)
+    print(f"Command: {args.command}")
+    print(f"Model: {args.model}")
+    print(f"Dataset: {args.dataset}")
+    print(f"Logs: {args.logs}")
     print(f"Debug: {args.debug}")
+    print(f"Debug function: {args.debug_function}")
 
     if args.debug and torch.cuda.device_count() > 0:
-        import sys
         from mrcnn.gpu_profile import trace_calls
-        os.environ['GPU_DEBUG'] = args.dev
-        os.environ['TRACE_INTO'] = 'train_epoch'
+        os.environ['GPU_DEBUG'] = str(args.dev)
+        os.environ['TRACE_INTO'] = args.debug_function
         sys.settrace(trace_calls)
+    else:
+        logging.info('Not using GPU profiler.')
 
     # Configurations
     if args.command == "train":
         config = NucleusConfig()
     else:
         config = InferenceConfig()
+
     if config.GPU_COUNT:
         mrcnn.config.DEVICE = torch.device('cuda:' + str(args.dev))
-        ExecutionConfig.DEVICE = torch.device('cuda:' + str(args.dev))
+        ExeCfg.DEVICE = torch.device('cuda:' + str(args.dev))
     else:
         mrcnn.config.DEVICE = torch.device('cpu')
     config.display()

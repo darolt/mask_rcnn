@@ -36,6 +36,35 @@ class NoPositiveAreaError(Exception):
 ############################################################
 
 
+def apply_box_deltas(boxes, deltas):
+    """Applies the given deltas to the given boxes.
+
+    Args:
+        boxes: [batch_size, N, 4] where each row is y1, x1, y2, x2
+        deltas: [batch_size, N, 4] where each row is [dy, dx, log(dh), log(dw)]
+
+    Returns:
+        results: [batch_size, N, 4], where each row is [y1, x1, y2, x2]
+    """
+    # Convert to y, x, h, w
+    height = boxes[:, :, 2] - boxes[:, :, 0]
+    width = boxes[:, :, 3] - boxes[:, :, 1]
+    center_y = boxes[:, :, 0] + 0.5 * height
+    center_x = boxes[:, :, 1] + 0.5 * width
+    # Apply deltas
+    center_y = center_y + deltas[:, :, 0] * height
+    center_x = center_x + deltas[:, :, 1] * width
+    height = height * torch.exp(deltas[:, :, 2])
+    width = width * torch.exp(deltas[:, :, 3])
+    # Convert back to y1, x1, y2, x2
+    y1 = center_y - 0.5 * height
+    x1 = center_x - 0.5 * width
+    y2 = y1 + height
+    x2 = x1 + width
+    result = torch.stack([y1, x1, y2, x2], dim=2)
+    return result
+
+
 def clip_to_window(window, boxes):
     """
         window: (y1, x1, y2, x2). The window in the image we want to clip to.
@@ -46,10 +75,6 @@ def clip_to_window(window, boxes):
     x = torch.cat([x1, x2], dim=1).clamp(float(window[1]), float(window[3]))
     boxes = torch.cat([y[:, 0].unsqueeze(1), x[:, 0].unsqueeze(1),
                        y[:, 1].unsqueeze(1), x[:, 1].unsqueeze(1)], dim=1)
-    # boxes[:, 0] = boxes[:, 0].clamp(float(window[0]), float(window[2]))
-    # boxes[:, 1] = boxes[:, 1].clamp(float(window[1]), float(window[3]))
-    # boxes[:, 2] = boxes[:, 2].clamp(float(window[0]), float(window[2]))
-    # boxes[:, 3] = boxes[:, 3].clamp(float(window[1]), float(window[3]))
     return boxes
 
 
@@ -299,7 +324,7 @@ def unmold_detections_x(detections, mrcnn_mask, image_shape, window):
     scores = detections[:N, 5]
     masks = mrcnn_mask[torch.arange(N, dtype=torch.long), :, :, class_ids]
 
-    return unmold_boxes_x(boxes, class_ids, masks, image_shape, window, scores)
+    return unmold_boxes_x(boxes, class_ids, masks, image_shape, window)
 
 
 def unmold_boxes(boxes, class_ids, masks, image_shape, window, scores=None):
@@ -355,12 +380,13 @@ def unmold_boxes_x(boxes, class_ids, masks, image_shape, window, scores=None):
     # Extract boxes, class_ids, scores, and class-specific masks
     class_ids = class_ids.to(torch.long)
 
+    register_hook(boxes, 'boxes1:')
     image_shape2 = (image_shape[0], image_shape[1])
-    boxes = to_img_domain(boxes, window, image_shape).floor()
+    boxes = to_img_domain(boxes, window, image_shape)
+    register_hook(boxes, 'boxes2:')
 
-    boxes, class_ids, masks, scores = remove_zero_area(boxes, class_ids,
-                                                       masks, scores)
-
+    boxes, _, masks, _ = remove_zero_area(boxes, class_ids, masks)
+    register_hook(boxes, 'boxes3:')
     full_masks = unmold_masks_x(masks, boxes, image_shape2)
 
     return boxes, full_masks
@@ -732,6 +758,32 @@ def intersect1d(tensor1, tensor2):
     aux = torch.cat((tensor1, tensor2), dim=0)
     aux = aux.sort()[0]
     return aux[:-1][(aux[1:] == aux[:-1]).detach()]
+
+
+def get_printer(msg):
+    """This function returns a printer function, that prints a message
+    and then print a tensor. Used by register_hook in the backward pass.
+    """
+    def printer(tensor):
+        if tensor.nelement() == 1:
+            print(f"{msg} {tensor}")
+        else:
+            print(f"{msg} shape: {tensor.shape}"
+                  f" max: {tensor.abs().max()} min: {tensor.abs().min()}"
+                  f" mean: {tensor.abs().mean()}")
+    return printer
+
+
+def register_hook(tensor, msg):
+    """Utility function to call retain_grad and Pytorch's register_hook
+    in a single line
+    """
+    # return
+    if not tensor.requires_grad:
+        print(f"Tensor does not require grad. ({msg})")
+        return
+    tensor.retain_grad()
+    tensor.register_hook(get_printer(msg))
 
 
 class SamePad2d(nn.Module):
