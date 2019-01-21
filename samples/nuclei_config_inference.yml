@@ -1,0 +1,11 @@
+---
+GPU_COUNT: 1
+IMAGES_PER_GPU: 1
+
+# Don't resize image during inference
+IMAGE:
+    RESIZE_MODE: pad64
+
+DETECTION:
+    MIN_CONFIDENCE: 0
+...

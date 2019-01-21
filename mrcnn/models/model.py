@@ -18,20 +18,22 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
 
-from mrcnn.config import ExecutionConfig as ExeCfg
 from mrcnn.utils import utils
-from mrcnn.models.components.anchors import generate_pyramid_anchors
-from mrcnn.utils.utils import MRCNNOutput, RPNOutput, RPNTarget,\
-                              MRCNNGroundTruth, get_empty_mrcnn_out
 from mrcnn.models.components.proposal import proposal_layer
 from mrcnn.models.components.detection import detection_layer
 from mrcnn.data.data_generator import DataGenerator
 from mrcnn.functions.losses import Losses, compute_losses
 from mrcnn.utils import visualize
+from mrcnn.models.components.anchors import generate_pyramid_anchors
+from mrcnn.models.components.detection_target import detection_target_layer
+from mrcnn.models.components.fpn import FPN, Classifier, Mask
 from mrcnn.models.components.resnet import ResNet
 from mrcnn.models.components.rpn import RPN
-from mrcnn.models.components.fpn import FPN, Classifier, Mask
-from mrcnn.models.components.detection_target import detection_target_layer
+from mrcnn.structs.mrcnn_ground_truth import MRCNNGroundTruth
+from mrcnn.structs.mrcnn_output import MRCNNOutput
+from mrcnn.structs.rpn_output import RPNOutput
+from mrcnn.structs.rpn_target import RPNTarget
+from tools.config import Config
 
 
 class MaskRCNN(nn.Module):
@@ -49,25 +51,23 @@ class MaskRCNN(nn.Module):
         "all": ".*",
     }
 
-    def __init__(self, config, model_dir):
+    def __init__(self, model_dir):
         """
-        config: A Sub-class of the Config class
         model_dir: Directory to save training logs and trained weights
         """
         super(MaskRCNN, self).__init__()
-        self.config = config
         self.model_dir = model_dir
         self.set_log_dir()
-        self.build(config=config)
+        self.build()
         self.initialize_weights()
         self.loss_history = []
         self.val_loss_history = []
 
-        h, w = self.config.IMAGE_SHAPE[:2]
+        h, w = Config.IMAGE.SHAPE[:2]
         scale = torch.from_numpy(np.array([h, w, h, w])).float()
-        self.scale = scale.to(ExeCfg.DEVICE)
+        self.scale = scale.to(Config.DEVICE)
 
-    def build(self, config):
+    def build(self):
         """Build Mask R-CNN architecture.
         """
         # Build the shared convolutional layers.
@@ -78,33 +78,34 @@ class MaskRCNN(nn.Module):
         C1, C2, C3, C4, C5 = resnet.stages()
 
         # Top-down Layers
-        # TODO: add assert to verify feature map sizes match what's in config
+        # TODO: add assert to verify feature map sizes match what's in Config
         self.fpn = FPN(C1, C2, C3, C4, C5, out_channels=256).float()
-        self.fpn.to(ExeCfg.DEVICE)
+        self.fpn.to(Config.DEVICE)
 
         # Generate Anchors
         anchors = generate_pyramid_anchors(
-            config.RPN_ANCHOR_SCALES,
-            config.RPN_ANCHOR_RATIOS,
-            config.BACKBONE_SHAPES,
-            config.BACKBONE_STRIDES,
-            config.RPN_ANCHOR_STRIDE)
-        new_anchors_shape = (self.config.BATCH_SIZE,) + anchors.shape
+            Config.RPN.ANCHOR.SCALES,
+            Config.RPN.ANCHOR.RATIOS,
+            Config.BACKBONE.SHAPES,
+            Config.BACKBONE.STRIDES,
+            Config.RPN.ANCHOR.STRIDE)
+        new_anchors_shape = (Config.TRAINING.BATCH_SIZE,) + anchors.shape
         anchors = np.broadcast_to(anchors, new_anchors_shape)
         self.anchors = torch.from_numpy(anchors).float()
-        self.anchors = self.anchors.to(ExeCfg.DEVICE)
+        self.anchors = self.anchors.to(Config.DEVICE)
 
         # RPN
-        self.rpn = RPN(len(config.RPN_ANCHOR_RATIOS),
-                       config.RPN_ANCHOR_STRIDE, 256).float()
+        self.rpn = RPN(len(Config.RPN.ANCHOR.RATIOS),
+                       Config.RPN.ANCHOR.STRIDE, 256).float()
 
         # FPN Classifier
-        self.classifier = Classifier(256, config.POOL_SIZE,
-                                     config.IMAGE_SHAPE, config.NUM_CLASSES).float()
+        self.classifier = Classifier(
+            256, Config.HEADS.POOL_SIZE,
+            Config.IMAGE.SHAPE, Config.NUM_CLASSES).float()
 
         # FPN Mask
-        self.mask = Mask(256, config.MASK_POOL_SIZE,
-                         config.IMAGE_SHAPE, config.NUM_CLASSES).float()
+        self.mask = Mask(256, Config.HEADS.MASK.POOL_SIZE,
+                         Config.IMAGE.SHAPE, Config.NUM_CLASSES).float()
 
         # Fix batch norm layers
         def set_bn_fix(model):
@@ -169,11 +170,11 @@ class MaskRCNN(nn.Module):
 
         # Directory for training logs
         self.log_dir = os.path.join(self.model_dir, "{}{:%Y%m%d_%H%M}".format(
-            self.config.NAME.lower(), now))
+            Config.NAME.lower(), now))
 
         # Path to save after each epoch. Include placeholders that get
         # filled by Keras.
-        checkpoint_file = "mask_rcnn_"+self.config.NAME.lower()+"_{}.pth"
+        checkpoint_file = "mask_rcnn_"+Config.NAME.lower()+"_{}.pth"
 
         self.checkpoint_path = os.path.join(self.log_dir, checkpoint_file)
 
@@ -186,7 +187,7 @@ class MaskRCNN(nn.Module):
         """
         # Get directory names. Each directory corresponds to a model
         dir_names = next(os.walk(self.model_dir))[1]
-        key = self.config.NAME.lower()
+        key = Config.NAME.lower()
         dir_names = filter(lambda f: f.startswith(key), dir_names)
         dir_names = sorted(dir_names)
         if not dir_names:
@@ -236,13 +237,13 @@ class MaskRCNN(nn.Module):
 
         # Mold inputs to format expected by the neural network
         molded_images, image_metas, windows = utils.mold_inputs(images,
-                                                                self.config)
+                                                                Config)
 
         # Convert images to torch tensor
         molded_images = torch.from_numpy(molded_images.transpose(0, 3, 1, 2))
 
         # To GPU
-        molded_images = molded_images.to(ExeCfg.DEVICE).float()
+        molded_images = molded_images.to(Config.DEVICE).float()
 
         # Run object detection
         with torch.no_grad():
@@ -309,7 +310,7 @@ class MaskRCNN(nn.Module):
         # [batch, num_detections, (y1, x1, y2, x2, class_id, score)]
         # in image coordinates
         with torch.no_grad():
-            detections = detection_layer(self.config, rpn_rois, mrcnn_class,
+            detections = detection_layer(Config, rpn_rois, mrcnn_class,
                                          mrcnn_deltas, image_metas)
 
         detection_boxes = detections[:, :4]/self.scale
@@ -330,10 +331,10 @@ class MaskRCNN(nn.Module):
 
         if mode == 'inference':
             self.eval()
-            proposal_count = self.config.POST_NMS_ROIS_INFERENCE
+            proposal_count = Config.PROPOSALS.POST_NMS_ROIS.INFERENCE
         elif mode == 'training':
             self.train()
-            proposal_count = self.config.POST_NMS_ROIS_TRAINING
+            proposal_count = Config.PROPOSALS.POST_NMS_ROIS.TRAINING
 
         # Set batchnorm always in eval mode during training
         self.apply(self._set_bn_eval)
@@ -350,9 +351,8 @@ class MaskRCNN(nn.Module):
                 rpn_out.classes,
                 rpn_out.deltas,
                 proposal_count=proposal_count,
-                nms_threshold=self.config.RPN_NMS_THRESHOLD,
-                anchors=anchors,
-                config=self.config)
+                nms_threshold=Config.RPN.NMS_THRESHOLD,
+                anchors=anchors)
 
         if mode == 'inference':
             return self._inference(mrcnn_feature_maps, rpn_rois, image_metas)
@@ -369,10 +369,10 @@ class MaskRCNN(nn.Module):
                 with torch.no_grad():
                     rois_, mrcnn_target = detection_target_layer(
                         rpn_rois[img_idx], gt.class_ids[img_idx],
-                        gt.boxes[img_idx], gt.masks[img_idx], self.config)
+                        gt.boxes[img_idx], gt.masks[img_idx])
 
                 if rois_.nelement() == 0:
-                    mrcnn_out = get_empty_mrcnn_out().to(ExeCfg.DEVICE)
+                    mrcnn_out = MRCNNOutput().to(Config.DEVICE)
                     logging.info('Rois size is empty')
                 else:
                     # Network Heads
@@ -395,13 +395,11 @@ class MaskRCNN(nn.Module):
             return rpn_out, mrcnn_targets, mrcnn_outs
 
     def _get_generators(self, train_dataset, val_dataset, augmentation):
-        train_set = DataGenerator(train_dataset, self.config,
-                                  augmentation=augmentation)
+        train_set = DataGenerator(train_dataset, augmentation=augmentation)
         train_generator = torch.utils.data.DataLoader(
-            train_set, shuffle=True, batch_size=self.config.BATCH_SIZE,
+            train_set, shuffle=True, batch_size=Config.TRAINING.BATCH_SIZE,
             num_workers=4)
-        val_set = DataGenerator(val_dataset, self.config,
-                                augmentation=augmentation)
+        val_set = DataGenerator(val_dataset, augmentation=augmentation)
         val_generator = torch.utils.data.DataLoader(
             val_set, batch_size=1, shuffle=True, num_workers=4)
         return train_generator, val_generator
@@ -444,21 +442,19 @@ class MaskRCNN(nn.Module):
                               if param.requires_grad and 'bn' in name]
         optimizer = optim.SGD([
             {'params': trainables_wo_bn,
-             'weight_decay': self.config.WEIGHT_DECAY},
+             'weight_decay': Config.TRAINING.WEIGHT_DECAY},
             {'params': trainables_only_bn}
-        ], lr=learning_rate, momentum=self.config.LEARNING_MOMENTUM)
+        ], lr=learning_rate, momentum=Config.TRAINING.LEARNING.MOMENTUM)
 
         for epoch in range(self.epoch+1, epochs+1):
             utils.log("Epoch {}/{}.".format(epoch, epochs))
 
             # Training
-            train_losses = self.train_epoch(
-                train_generator, optimizer, self.config.STEPS_PER_EPOCH)
+            train_losses = self.train_epoch(train_generator, optimizer)
 
             # Validation
             with torch.no_grad():
-                val_losses = self.validation_epoch(
-                    val_generator, self.config.VALIDATION_STEPS)
+                val_losses = self.validation_epoch(val_generator)
 
             # Statistics
             self.loss_history.append(train_losses)
@@ -472,8 +468,10 @@ class MaskRCNN(nn.Module):
 
         self.epoch = epochs
 
-    def train_epoch(self, datagenerator, optimizer, steps):
+    def train_epoch(self, datagenerator, optimizer):
+        """Trains a single epoch."""
         losses_sum = Losses()
+        steps = Config.TRAINING.STEPS_PER_EPOCH
 
         for step, inputs in enumerate(datagenerator):
             if step == steps:
@@ -513,9 +511,10 @@ class MaskRCNN(nn.Module):
 
         return losses_sum
 
-    def validation_epoch(self, datagenerator, steps):
+    def validation_epoch(self, datagenerator):
         """Validation step. Usually called with torch.no_grad()."""
         losses_sum = Losses()
+        steps = Config.TRAINING.VALIDATION_STEPS
 
         for step, inputs in enumerate(datagenerator):
             # Break after 'steps' steps
@@ -542,11 +541,11 @@ class MaskRCNN(nn.Module):
 
     @staticmethod
     def _prepare_inputs(inputs):
-        images = inputs[0].to(ExeCfg.DEVICE)
+        images = inputs[0].to(Config.DEVICE)
         image_metas = inputs[1]
         rpn_target = RPNTarget(inputs[2], inputs[3])
         gt = MRCNNGroundTruth(inputs[4], inputs[5], inputs[6])
-        rpn_target.to(ExeCfg.DEVICE)
-        gt.to(ExeCfg.DEVICE)
+        rpn_target.to(Config.DEVICE)
+        gt.to(Config.DEVICE)
 
         return (images, image_metas, rpn_target, gt)

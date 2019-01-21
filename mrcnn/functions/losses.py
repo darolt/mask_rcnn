@@ -4,7 +4,7 @@ import numpy as np
 import torch.nn.functional as F
 import torch
 
-from mrcnn.config import ExecutionConfig as ExeCfg
+from tools.config import Config
 from mrcnn.utils.utils import unmold_boxes_x, unmold_detections_x
 
 
@@ -48,11 +48,6 @@ class Losses():
         new_mrcnn_mask = self.mrcnn_mask + other.mrcnn_mask
         return Losses(new_rpn_class, new_rpn_bbox, new_mrcnn_class,
                       new_mrcnn_bbox, new_mrcnn_mask)
-
-
-############################################################
-#  Loss Functions
-############################################################
 
 
 def compute_rpn_class_loss(rpn_match, rpn_class_logits):
@@ -129,7 +124,7 @@ def compute_mrcnn_class_loss(target_class_ids, pred_class_logits):
     if target_class_ids.nelement() != 0 and pred_class_logits.nelement() != 0:
         loss = F.cross_entropy(pred_class_logits, target_class_ids.long())
     else:
-        loss = torch.tensor([0], dtype=torch.float32, device=ExeCfg.DEVICE)
+        loss = torch.tensor([0], dtype=torch.float32, device=Config.DEVICE)
 
     return loss
 
@@ -156,7 +151,7 @@ def compute_mrcnn_bbox_loss(target_bbox, target_class_ids, pred_bbox):
         # Smooth L1 loss
         loss = F.smooth_l1_loss(pred_bbox, target_bbox)
     else:
-        loss = torch.tensor([0], dtype=torch.float32, device=ExeCfg.DEVICE)
+        loss = torch.tensor([0], dtype=torch.float32, device=Config.DEVICE)
 
     return loss
 
@@ -185,7 +180,7 @@ def compute_mrcnn_mask_loss(target_masks, target_class_ids, pred_masks):
         # Binary cross entropy
         loss = F.binary_cross_entropy(y_pred, y_true)
     else:
-        loss = torch.tensor([0], dtype=torch.float32, device=ExeCfg.DEVICE)
+        loss = torch.tensor([0], dtype=torch.float32, device=Config.DEVICE)
 
     return loss
 
@@ -196,14 +191,14 @@ def compute_rpn_losses(rpn_target, rpn_out):
                                             rpn_out.class_logits)
     rpn_bbox_loss = compute_rpn_bbox_loss(rpn_target.deltas,
                                           rpn_target.match, rpn_out.deltas)
-    zero = torch.tensor([0.0], dtype=torch.float32, device=ExeCfg.DEVICE)
+    zero = torch.tensor([0.0], dtype=torch.float32, device=Config.DEVICE)
 
     return Losses(rpn_class_loss, rpn_bbox_loss, zero.clone(),
                   zero.clone(), zero.clone())
 
 
 def compute_mrcnn_losses(mrcnn_targets, mrcnn_outs):
-    zero = torch.tensor([0.0], dtype=torch.float32, device=ExeCfg.DEVICE)
+    zero = torch.tensor([0.0], dtype=torch.float32, device=Config.DEVICE)
     mrcnn_class_loss = zero.clone()
     mrcnn_bbox_loss = zero.clone()
     mrcnn_mask_loss = zero.clone()
@@ -355,10 +350,10 @@ def _gen_grid(mask, y1, x1, y2, x2):
     indices_x = x2.repeat((dy, dx))
     x_range = torch.arange(0.0, dx).repeat((dy,)).reshape((dy, dx))
     y_range = torch.arange(0.0, dy).repeat((dx,)).reshape((dx, dy)).t()
-    indices_y = indices_y + y_range.to(ExeCfg.DEVICE)
-    indices_x = indices_x + x_range.to(ExeCfg.DEVICE)
+    indices_y = indices_y + y_range.to(Config.DEVICE)
+    indices_x = indices_x + x_range.to(Config.DEVICE)
     indices = torch.stack((indices_y, indices_x), dim=2)
-    shape = torch.FloatTensor((mask.shape[0], mask.shape[1])).to(ExeCfg.DEVICE)
+    shape = torch.FloatTensor((mask.shape[0], mask.shape[1])).to(Config.DEVICE)
     indices = (indices - shape)/shape
     return indices
 
@@ -390,7 +385,7 @@ def _compute_intersection(pred_mask, gt_mask, pred_inter_idx, gt_inter_idx):
 def _compute_factor(pred_inter_idx):
     """Returns a value inside the range [-1, 0]. The higher the value, closer
     are the boxes."""
-    factor = pred_inter_idx.sum().to(ExeCfg.DEVICE)
+    factor = pred_inter_idx.sum().to(Config.DEVICE)
     factor = (factor/100).sigmoid() - 1.0
 
     assert (factor <= 0).byte().all(), 'Factor cannot be greater than 0.'
@@ -486,7 +481,7 @@ MAGNIFIER = 100
 def _compute_map(ious):
     """Compute mean average precision."""
     thresholds = torch.arange(0.5, 1.0, 0.05)
-    precisions = torch.empty_like(thresholds, device=ExeCfg.DEVICE)
+    precisions = torch.empty_like(thresholds, device=Config.DEVICE)
     for thresh_idx, threshold in enumerate(thresholds):
         hits = ((ious - threshold)*MAGNIFIER).sigmoid()
         gt_sum = ((hits.sum(dim=0) - 0.5)*MAGNIFIER).sigmoid()

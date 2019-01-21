@@ -2,7 +2,7 @@ import logging
 
 import torch
 
-from mrcnn.config import ExecutionConfig as ExeCfg
+from tools.config import Config
 
 
 def compute_map_metric(gt_masks, pred_masks):
@@ -45,7 +45,7 @@ def compute_map(ious):
     """Compute mean average precision."""
     # compute hits
     thresholds = torch.arange(0.5, 1.0, 0.05)
-    precisions = torch.empty_like(thresholds, device=ExeCfg.DEVICE)
+    precisions = torch.empty_like(thresholds, device=Config.DEVICE)
     for thresh_idx, threshold in enumerate(thresholds):
         hits = ious > threshold
         tp = torch.nonzero(hits.sum(dim=1)).shape[0]

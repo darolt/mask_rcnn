@@ -1,6 +1,9 @@
+
+
 import torch
 from ._ext import nms
-import mrcnn.config
+
+from tools.config import Config
 
 
 def pth_nms(dets, thresh):
@@ -21,12 +24,8 @@ def pth_nms(dets, thresh):
         return keep[:num_out[0]]
     else:
         dets_temp = torch.zeros(dets.size(), dtype=torch.float32,
-                                device=mrcnn.config.DEVICE)
-        dets_temp[:, 0] = dets[:, 1]
-        dets_temp[:, 1] = dets[:, 0]
-        dets_temp[:, 2] = dets[:, 3]
-        dets_temp[:, 3] = dets[:, 2]
-        dets_temp[:, 4] = dets[:, 4]
+                                device=Config.DEVICE)
+        dets_temp = dets[:, [1, 0, 3, 2, 4]]
 
         dets = dets[order].contiguous()
 

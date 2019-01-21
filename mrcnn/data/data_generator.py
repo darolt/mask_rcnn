@@ -5,9 +5,18 @@ import numpy as np
 
 from mrcnn.utils import utils
 from mrcnn.models.components import anchors
+from tools.config import Config
 
 
-def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
+# Augmentors that are safe to apply to masks
+# Some, such as Affine, have settings that make them unsafe, so always
+# test your augmentation on masks
+MASK_AUGMENTERS = ["Sequential", "SomeOf", "OneOf", "Sometimes",
+                   "Fliplr", "Flipud", "CropAndPad",
+                   "Affine", "PiecewiseAffine"]
+
+
+def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
                   augmentation=None):
     """Load and return ground truth data for an image (image, mask,
        bounding boxes).
@@ -33,19 +42,12 @@ def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
     image = dataset_handler.load_image(image_id)
     mask, class_ids = dataset_handler.load_mask(image_id)
     shape = image.shape
-    image, window, scale, padding, crop = utils.mold_image(image, config)
+    image, window, scale, padding, crop = utils.mold_image(image)
     mask = utils.resize_mask(mask, scale, padding, crop)
 
     # Augmentation
     # This requires the imgaug lib (https://github.com/aleju/imgaug)
     if augmentation:
-        # Augmentors that are safe to apply to masks
-        # Some, such as Affine, have settings that make them unsafe, so always
-        # test your augmentation on masks
-        MASK_AUGMENTERS = ["Sequential", "SomeOf", "OneOf", "Sometimes",
-                           "Fliplr", "Flipud", "CropAndPad",
-                           "Affine", "PiecewiseAffine"]
-
         def hook(images, augmenter, parents, default):  # pylint: disable=W0613
             """Determines which augmenters to apply to masks."""
             return augmenter.__class__.__name__ in MASK_AUGMENTERS
@@ -85,7 +87,7 @@ def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
 
     # Resize masks to smaller size to reduce memory usage
     if use_mini_mask:
-        mask = utils.minimize_masks(bbox, mask, config.MINI_MASK_SHAPE)
+        mask = utils.minimize_masks(bbox, mask, Config.MINI_MASK.SHAPE)
 
     # Image meta data
     image_meta = utils.compose_image_meta(image_id, shape,
@@ -94,7 +96,7 @@ def load_image_gt(dataset_handler, config, image_id, use_mini_mask=False,
     return image, image_meta, class_ids, bbox, mask
 
 
-def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
+def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes):
     """Given the anchors and GT boxes, compute overlaps and identify positive
     anchors and deltas to refine them to match their corresponding GT boxes.
 
@@ -110,7 +112,7 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     # RPN Match: 1 = positive anchor, -1 = negative anchor, 0 = neutral
     rpn_match = np.zeros([anchors.shape[0]], dtype=np.int32)
     # RPN bounding boxes: [max anchors per image, (dy, dx, log(dh), log(dw))]
-    rpn_bbox = np.zeros((config.RPN_TRAIN_ANCHORS_PER_IMAGE, 4))
+    rpn_bbox = np.zeros((Config.RPN.ANCHOR.NB_PER_IMAGE, 4))
 
     # Handle COCO crowds
     # A crowd box in COCO is a bounding box around several instances. Exclude
@@ -156,14 +158,14 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
     # Subsample to balance positive and negative anchors
     # Don't let positives be more than half the anchors
     ids = np.where(rpn_match == 1)[0]
-    extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE // 2)
+    extra = len(ids) - (Config.RPN.ANCHOR.NB_PER_IMAGE // 2)
     if extra > 0:
         # Reset the extra ones to neutral
         ids = np.random.choice(ids, extra, replace=False)
         rpn_match[ids] = 0
     # Same for negative proposals
     ids = np.where(rpn_match == -1)[0]
-    extra = len(ids) - (config.RPN_TRAIN_ANCHORS_PER_IMAGE -
+    extra = len(ids) - (Config.RPN.ANCHOR.NB_PER_IMAGE -
                         np.sum(rpn_match == 1))
     if extra > 0:
         # Rest the extra ones to neutral
@@ -199,14 +201,14 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes, config):
             np.log(gt_w / a_w),
         ]
         # Normalize
-        rpn_bbox[ix] /= config.RPN_BBOX_STD_DEV.squeeze(0)
+        rpn_bbox[ix] /= Config.RPN.BBOX_STD_DEV.squeeze(0)
         ix += 1
 
     return rpn_match, rpn_bbox
 
 
 class DataGenerator(Dataset):
-    def __init__(self, dataset_handler, config, augmentation=None):
+    def __init__(self, dataset_handler, augmentation=None):
         """A generator that returns images and corresponding target class ids,
             bounding box deltas, and masks.
 
@@ -243,16 +245,15 @@ class DataGenerator(Dataset):
         self.error_count = 0
 
         self.dataset_handler = dataset_handler
-        self.config = config
         self.augmentation = augmentation
 
         # Anchors
         # [anchor_count, (y1, x1, y2, x2)]
-        self.anchors = anchors.generate_pyramid_anchors(config.RPN_ANCHOR_SCALES,
-                                                        config.RPN_ANCHOR_RATIOS,
-                                                        config.BACKBONE_SHAPES,
-                                                        config.BACKBONE_STRIDES,
-                                                        config.RPN_ANCHOR_STRIDE)
+        self.anchors = anchors.generate_pyramid_anchors(Config.RPN.ANCHOR.SCALES,
+                                                        Config.RPN.ANCHOR.RATIOS,
+                                                        Config.BACKBONE.SHAPES,
+                                                        Config.BACKBONE.STRIDES,
+                                                        Config.RPN.ANCHOR.STRIDE)
         self.anchors = torch.from_numpy(self.anchors)
 
     def __getitem__(self, image_index):
@@ -260,45 +261,44 @@ class DataGenerator(Dataset):
         image_id = self.image_ids[image_index]
         while True:
             image, image_metas, gt_class_ids, gt_boxes, gt_masks = \
-                load_image_gt(self.dataset_handler, self.config, image_id,
+                load_image_gt(self.dataset_handler, image_id,
                               augmentation=self.augmentation,
-                              use_mini_mask=self.config.USE_MINI_MASK)
+                              use_mini_mask=Config.MINI_MASK.USE)
             if np.any(gt_class_ids > 0):
                 break
 
         # RPN Targets
         rpn_match, rpn_bbox = build_rpn_targets(image.shape, self.anchors,
-                                                gt_class_ids, gt_boxes,
-                                                self.config)
+                                                gt_class_ids, gt_boxes)
 
         # If more instances than fits in the array, sub-sample from them.
-        if gt_boxes.shape[0] > self.config.MAX_GT_INSTANCES:
+        if gt_boxes.shape[0] > Config.DETECTION.MAX_GT_INSTANCES:
             ids = np.random.choice(np.arange(gt_boxes.shape[0]),
-                                   self.config.MAX_GT_INSTANCES,
+                                   Config.DETECTION.MAX_GT_INSTANCES,
                                    replace=False)
             gt_class_ids = gt_class_ids[ids]
             gt_boxes = gt_boxes[ids]
             gt_masks = gt_masks[:, :, ids]
-        elif gt_boxes.shape[0] < self.config.MAX_GT_INSTANCES:
-            gt_class_ids_ = np.zeros((self.config.MAX_GT_INSTANCES),
+        elif gt_boxes.shape[0] < Config.DETECTION.MAX_GT_INSTANCES:
+            gt_class_ids_ = np.zeros((Config.DETECTION.MAX_GT_INSTANCES),
                                      dtype=np.int32)
             gt_class_ids_[:gt_class_ids.shape[0]] = gt_class_ids
             gt_class_ids = gt_class_ids_
 
-            gt_boxes_ = np.zeros((self.config.MAX_GT_INSTANCES, 4),
+            gt_boxes_ = np.zeros((Config.DETECTION.MAX_GT_INSTANCES, 4),
                                  dtype=np.int32)
             gt_boxes_[:gt_boxes.shape[0]] = gt_boxes
             gt_boxes = gt_boxes_
 
             gt_masks_ = np.zeros((gt_masks.shape[0], gt_masks.shape[1],
-                                  self.config.MAX_GT_INSTANCES),
+                                  Config.DETECTION.MAX_GT_INSTANCES),
                                  dtype=np.int32)
             gt_masks_[:, :, :gt_masks.shape[-1]] = gt_masks
             gt_masks = gt_masks_
 
         # Add to batch
         rpn_match = rpn_match[:, np.newaxis]
-        image = utils.subtract_mean(image, self.config)
+        image = utils.subtract_mean(image)
 
         # Convert to tensors
         image = torch.from_numpy(image.transpose(2, 0, 1)).float()

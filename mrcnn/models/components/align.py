@@ -2,7 +2,7 @@ import torch
 from torch import isnan
 
 from roialign.roi_align.crop_and_resize import CropAndResizeFunction
-from mrcnn.config import ExecutionConfig as ExeCfg
+from tools.config import Config
 
 
 def pyramid_roi_align(boxes, feature_maps, pool_size, image_shape):
@@ -37,7 +37,7 @@ def pyramid_roi_align(boxes, feature_maps, pool_size, image_shape):
     # the fact that our coordinates are normalized here.
     # e.g. a 224x224 ROI (in pixels) maps to P4
     image_area = torch.tensor([float(image_shape[0]*image_shape[1])],
-                              dtype=torch.float32, device=ExeCfg.DEVICE)
+                              dtype=torch.float32, device=Config.DEVICE)
     roi_level = 4 + torch.log2(torch.sqrt(h*w)/(224.0/torch.sqrt(image_area)))
     roi_level = roi_level.round().int()
     roi_level = roi_level.clamp(2, 5)
@@ -69,7 +69,7 @@ def pyramid_roi_align(boxes, feature_maps, pool_size, image_shape):
         # which is how it's done in tf.crop_and_resize()
         # Result: [batch * num_boxes, pool_height, pool_width, channels]
         ind = torch.zeros(level_boxes.shape[0], dtype=torch.int,
-                          device=ExeCfg.DEVICE)
+                          device=Config.DEVICE)
         # CropAndResizeFunction needs batch dimension
         pooled_features = (CropAndResizeFunction(pool_size, pool_size, 0)
                            (feature_maps[i], level_boxes, ind))

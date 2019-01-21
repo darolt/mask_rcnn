@@ -10,18 +10,26 @@ import yaml
 class MetaConfig(type):
     """Metaclass used to block modifications to Config attributes if the
     configuration is frozen."""
-    def __setattr__(self, name, value):
+    def __setattr__(cls, name, value):
         if Config._FROZEN and name != '_FROZEN':
             raise Exception('Configuration is frozen.')
-        return super(MetaConfig, self).__setattr__(name, value)
+        return super(MetaConfig, cls).__setattr__(name, value)
 
 
 class Config(metaclass=MetaConfig):
-    """Stores execution configuration."""
-    DEFAULT_CONFIG_FN = 'base_config.yml'
+    """Stores execution configuration.
+    Usage:
+        Initialization:
+            Config.load_default(config_fn)
+            Config.merge(other_fn)
+            Config.freeze()
+        Get:
+            Config.ATTRIBUTE1.ATTRIBUTE1_1.ATTRIBUTE1_1_1
+        """
+    DEFAULT_CONFIG_FN = './mrcnn/base_config.yml'
+    _FROZEN = False
 
     _DEFAULT_LOADED = False
-    _FROZEN = False
     _CURRENT_CFG = None
 
     class ConfigNode():  # !pylint: disable=R0903
@@ -61,13 +69,12 @@ class Config(metaclass=MetaConfig):
     @classmethod
     def to_string(cls):
         """Recursively convert to string."""
-        to_str = ""
-        if cls._DEFAULT_LOADED:
-            to_str += 'Default configuration: \n'
-        else:
-            to_str += 'Modified configuration: \n'
-        to_str += str(cls._CURRENT_CFG)
-        return to_str
+        return str(cls._CURRENT_CFG)
+
+    @classmethod
+    def display(cls):
+        """Displays configurations."""
+        print(cls.to_string())
 
     @classmethod
     def freeze(cls):
@@ -90,7 +97,11 @@ class Config(metaclass=MetaConfig):
         """
         with open(config_fn) as stream:
             config_dict = yaml.safe_load(stream)
-            cls._CURRENT_CFG = config_dict
+            if cls._CURRENT_CFG:
+                # TODO implement recursive dict merge
+                cls._CURRENT_CFG.update(config_dict)
+            else:
+                cls._CURRENT_CFG = config_dict
 
         cls._build_config_tree(cls, config_dict)
 
@@ -105,12 +116,15 @@ class Config(metaclass=MetaConfig):
         """
         if isinstance(value, dict):  # parent has children
             for child_name, child_value in value.items():
-                print(child_name)
-                print(child_value)
-                print(type(child_value))
+                # print(child_name)
+                # print(child_value)
+                # print(type(child_value))
                 if isinstance(child_value, dict):
                     child_node = Config.ConfigNode()
-                    setattr(parent, child_name, child_node)
+                    if not hasattr(parent, child_name):
+                        setattr(parent, child_name, child_node)
+                    else:
+                        child_node = getattr(parent, child_name)
                     Config._build_config_tree(child_node, child_value)
                 else:
                     setattr(parent, child_name, child_value)
