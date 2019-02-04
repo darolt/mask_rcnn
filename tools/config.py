@@ -2,6 +2,9 @@
 Configuration classes.
 Configuration is supposed to be accessed as class attributes and managed by
 Config class.
+
+Licensed under The MIT License
+Written by Jean Da Rolt
 """
 
 import yaml

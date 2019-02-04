@@ -310,7 +310,7 @@ class MaskRCNN(nn.Module):
         # [batch, num_detections, (y1, x1, y2, x2, class_id, score)]
         # in image coordinates
         with torch.no_grad():
-            detections = detection_layer(Config, rpn_rois, mrcnn_class,
+            detections = detection_layer(rpn_rois, mrcnn_class,
                                          mrcnn_deltas, image_metas)
 
         detection_boxes = detections[:, :4]/self.scale

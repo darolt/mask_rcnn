@@ -1,4 +1,9 @@
-"""This module is used for profiling GPU memory."""
+"""
+This module is used for profiling the use of GPU memory.
+
+Licensed under The MIT License
+Written by Jean Da Rolt
+"""
 import datetime
 import gc
 import logging

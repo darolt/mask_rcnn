@@ -1,3 +1,7 @@
+#include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <THC/THC.h>
+#include <THC/THCDeviceUtils.cuh>
 #include <math.h>
 #include <stdio.h>
 #include "crop_and_resize_kernel.h"

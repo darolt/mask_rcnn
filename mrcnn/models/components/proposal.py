@@ -1,12 +1,10 @@
-import logging
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from tools.config import Config
 from mrcnn.utils import utils
-from nms.nms_wrapper import nms
+import nms_wrapper
 
 
 def proposal_layer(scores, deltas, proposal_count, nms_threshold, anchors):
@@ -59,19 +57,11 @@ def proposal_layer(scores, deltas, proposal_count, nms_threshold, anchors):
 
 
 def _apply_nms(boxes, scores, nms_threshold, proposal_count):
-    nms_input = torch.cat((boxes,
-                           scores.reshape((boxes.shape[0:2] + (1,)))),
-                          2)
-    boxes_end = []
-    for img_idx in range(boxes.shape[0]):
-        keep = nms(nms_input[img_idx], nms_threshold)
-        keep = keep[:proposal_count]
-        pad_size = proposal_count - keep.shape[0]
-        boxes_ = boxes[img_idx, keep, :]
-        if pad_size > 0:
-            logging.debug(f"Proposal pad size after NMS is {pad_size}")
-            boxes_ = F.pad(boxes_, (0, 0, 0, pad_size), value=0)
-        boxes_end.append(boxes_.unsqueeze(0))
-
-    boxes = torch.cat(boxes_end, 0)
-    return boxes
+    # nms_input = torch.cat((boxes,
+    #                        scores.reshape((boxes.shape[0:2] + (1,)))),
+    #                       2)
+    return nms_wrapper.nms_wrapper(
+        boxes,
+        scores,
+        nms_threshold,
+        proposal_count)

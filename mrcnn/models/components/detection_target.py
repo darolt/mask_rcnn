@@ -2,10 +2,10 @@ import logging
 
 import torch
 
-from roialign.roi_align.crop_and_resize import CropAndResizeFunction
-from tools.config import Config
 from mrcnn.utils import utils
 from mrcnn.structs.mrcnn_target import MRCNNTarget
+from mrcnn.models.components.roialign.crop_and_resize import CropAndResizeFunction
+from tools.config import Config
 
 
 def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):

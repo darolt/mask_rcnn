@@ -1,9 +1,3 @@
-#ifndef _CropAndResize_Kernel
-#define _CropAndResize_Kernel
-
-#ifdef __cplusplus
-extern "C" {
-#endif
 
 void CropAndResizeLaucher(
     const float *image_ptr, const float *boxes_ptr,
@@ -16,9 +10,3 @@ void CropAndResizeBackpropImageLaucher(
     const int *box_ind_ptr, int num_boxes, int batch, int image_height,
     int image_width, int crop_height, int crop_width, int depth,
     float *grads_image_ptr, cudaStream_t stream);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif

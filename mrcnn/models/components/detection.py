@@ -3,7 +3,7 @@ import torch
 
 from tools.config import Config
 from mrcnn.utils import utils
-from nms.nms_wrapper import nms
+import nms_wrapper
 
 
 def to_input_domain(rois, probs, deltas, image_meta):
@@ -65,7 +65,7 @@ def _to_input_domain(rois, probs, deltas, image_meta):
     # Round and cast to int since we're dealing with pixels now
     return refined_rois, class_ids, class_scores
 
-
+# TODO fix this
 def _apply_nms(class_ids, class_scores, refined_rois, keep):
     pre_nms_class_ids = class_ids[keep]
     pre_nms_scores = class_scores[keep]
@@ -79,7 +79,7 @@ def _apply_nms(class_ids, class_scores, refined_rois, keep):
         class_scores, order = class_scores.sort(descending=True)
         class_rois = class_rois[order, :]
 
-        class_keep = nms(
+        class_keep = nms_wrapper.nms_wrapper(
             torch.cat((class_rois, class_scores.unsqueeze(1)), dim=1),
             Config.DETECTION.NMS_THRESHOLD)
 

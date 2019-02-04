@@ -1,7 +1,7 @@
 import torch
 from torch import isnan
 
-from roialign.roi_align.crop_and_resize import CropAndResizeFunction
+from mrcnn.models.components.roialign.crop_and_resize import CropAndResizeFunction
 from tools.config import Config
 
 
