@@ -9,7 +9,7 @@ import torch
 from tools.config import Config
 
 
-def init_config(config_fns, device):
+def init_config(config_fns, cmd_args):
     """Loads configurations from YAML files, then create utilitaire
     configurations. Freeze config and display it.
     """
@@ -17,8 +17,8 @@ def init_config(config_fns, device):
     for filename in config_fns:
         Config.merge(filename)
 
-    if Config.GPU_COUNT:
-        Config.DEVICE = torch.device('cuda:' + str(device))
+    if Config.GPU_COUNT and str(cmd_args.dev) in '0123456789':
+        Config.DEVICE = torch.device('cuda:' + str(cmd_args.dev))
 
     if Config.GPU_COUNT > 0:
         Config.TRAINING.BATCH_SIZE = \
@@ -42,11 +42,19 @@ def init_config(config_fns, device):
           int(math.ceil(Config.IMAGE.SHAPE[1] / stride))]
          for stride in Config.BACKBONE.STRIDES])
 
-    Config.RPN.BBOX_STD_DEV = torch.from_numpy(
+    Config.RPN.BBOX_STD_DEV_GPU = torch.from_numpy(
         np.reshape(Config.RPN.BBOX_STD_DEV, [1, 4])
-        ).float()
+        ).float().to(Config.DEVICE)
 
     Config.BBOX_STD_DEV = np.array(Config.BBOX_STD_DEV)
+
+    # this configurations are for speeding up the training
+    height, width = Config.IMAGE.SHAPE[:2]
+    Config.RPN.CLIP_WINDOW = np.array([0, 0, height, width]).astype(np.float32)
+    Config.RPN.NORM = torch.tensor(
+        np.array([height, width, height, width]),
+        requires_grad=False, dtype=torch.float32,
+        device=Config.DEVICE)
 
     check_config()
     Config.freeze()

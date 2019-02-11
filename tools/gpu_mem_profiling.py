@@ -8,6 +8,7 @@ import datetime
 import gc
 import logging
 import os
+import sys
 
 import torch
 from py3nvml import py3nvml
@@ -20,6 +21,12 @@ GPU_PROFILE_FN = (f"{datetime.datetime.now():%d-%b-%y-%H:%M:%S}"
                   f"-gpu_mem_prof.txt")
 if 'GPU_DEBUG' in os.environ:
     logging.info(f"profiling gpu usage to {GPU_PROFILE_FN}")
+
+
+def init_profiler(device, debug_function):
+    os.environ['GPU_DEBUG'] = str(device, debug_function)
+    os.environ['TRACE_INTO'] = debug_function
+    sys.settrace(trace_calls)
 
 
 def trace_calls(frame, event, arg):  # pylint: disable=W0613

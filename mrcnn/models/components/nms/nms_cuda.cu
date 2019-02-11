@@ -11,10 +11,11 @@
 
 #include <vector>
 #include <iostream>
+#include <thread>
 
-
+unsigned int sizeofULL = sizeof(unsigned long long);
 int const block_size = sizeof(unsigned long long) * 8;
-
+extern THCState *state;
 
 /**
  * Computes IoU of two boxes.
@@ -90,56 +91,47 @@ __global__ void compute_iou_kernel(
 /**
  * Given the IoU matrix, computes NMS.
  */
-inline at::Tensor compute_nms(
-  const int nb_col_blocks,
-  const int batch_size,
-  const int nb_max_proposals,
-  const int nb_elements_tri,
-  const int nb_boxes,
-  std::vector<unsigned long long> iou_matrix_host,
-  const at::Tensor boxes) {
+void compute_nms(
+    const int thread_idx,
+    at::Tensor& keep,
+    const int nb_col_blocks,
+    const int nb_max_proposals,
+    const int nb_elements_tri,
+    const int nb_boxes,
+    std::vector<unsigned long long>& iou_matrix_host) {
 
   std::vector<unsigned long long> suppress(nb_col_blocks);
+  std::fill(suppress.begin(), suppress.end(), 0);
 
-  at::Tensor keep = at::empty({batch_size, nb_max_proposals},
-                              boxes.options().dtype(at::kLong)
-                                             .device(at::kCPU)
-                                             .requires_grad(false));
+  int num_to_keep = 0;
+  for (int i = 0; i < nb_boxes; i++) {
+    int nblock = i / block_size;
+    int inblock = i % block_size;
 
-  // TODO use threads
-  for (int img_idx = 0; img_idx < batch_size; img_idx++) {
-    std::fill(suppress.begin(), suppress.end(), 0);
-    int num_to_keep = 0;
-    for (int i = 0; i < nb_boxes; i++) {
-      int nblock = i / block_size;
-      int inblock = i % block_size;
+    if (!(suppress[nblock] & (1ULL << inblock))) {
+      keep[thread_idx][num_to_keep++] = i;
+      unsigned long long *p = &iou_matrix_host[0] +
+                              thread_idx*nb_elements_tri*block_size +
+                              inblock*nb_elements_tri;
 
-      if (!(suppress[nblock] & (1ULL << inblock))) {
-        keep[img_idx][num_to_keep++] = i;
-        unsigned long long *p = &iou_matrix_host[0] +
-                                img_idx*nb_elements_tri*block_size +
-                                inblock*nb_elements_tri;
-        for (int j = nblock; j < nb_col_blocks; j++) {
-          int linear_idx = nblock*nb_col_blocks + j%nb_col_blocks;
-          suppress[j] |= p[linear_idx];
-        }
-        if (num_to_keep == nb_max_proposals)
-          break;
+      for (int j = nblock; j < nb_col_blocks; j++) {
+        int linear_idx = nblock*nb_col_blocks + j%nb_col_blocks;
+        suppress[j] |= p[linear_idx];
       }
+      if (num_to_keep == nb_max_proposals)
+        break;
     }
   }
-  return keep;
+  return;
 }
 
-at::Tensor nms_cuda(const at::Tensor boxes,
+at::Tensor nms_cuda(const at::Tensor& boxes,
                     const float threshold,
                     const int nb_max_proposals) {
   int batch_size = boxes.size(0);
   int nb_boxes = boxes.size(1);
 
   const int nb_col_blocks = THCCeilDiv(nb_boxes, block_size);
-
-  THCState *state = at::globalContext().lazyInitCUDA();
 
   // compute triangular number
   int nb_elements_tri = 0;
@@ -151,7 +143,6 @@ at::Tensor nms_cuda(const at::Tensor boxes,
   int c_row = 2*pivot_row + is_even;
   int c_col = 2*pivot_col + is_even + 1;
 
-  unsigned int sizeofULL = sizeof(unsigned long long);
   unsigned int iou_matrix_size = batch_size*nb_elements_tri*block_size;
   unsigned int iou_matrix_size_bytes = iou_matrix_size*sizeofULL;
   auto iou_matrix = (unsigned long long*) THCudaMalloc(state, iou_matrix_size_bytes);
@@ -165,11 +156,29 @@ at::Tensor nms_cuda(const at::Tensor boxes,
   std::vector<unsigned long long> iou_matrix_host(iou_matrix_size);
   THCudaCheck(cudaMemcpy(&iou_matrix_host[0], iou_matrix,
                          iou_matrix_size_bytes, cudaMemcpyDeviceToHost));
-
-  auto keep = compute_nms(nb_col_blocks, batch_size, nb_max_proposals,
-                          nb_elements_tri, nb_boxes, iou_matrix_host,
-                          boxes);
-
   THCudaFree(state, iou_matrix);
+
+  at::Tensor keep = at::empty({batch_size, nb_max_proposals},
+                              boxes.options().dtype(at::kLong)
+                                             .device(at::kCPU)
+                                             .requires_grad(false));
+
+  std::thread threads[batch_size];
+  for (int img_idx=0; img_idx < batch_size; img_idx++) {
+    threads[img_idx] = std::thread(
+      compute_nms,
+      img_idx,
+      std::ref(keep),
+      nb_col_blocks,
+      nb_max_proposals,
+      nb_elements_tri,
+      nb_boxes,
+      std::ref(iou_matrix_host));
+  }
+
+  for (auto& thread: threads) {
+    thread.join();
+  }
+
   return keep.to(boxes.device());
 }

@@ -26,7 +26,9 @@ from mrcnn.functions.losses import Losses, compute_losses
 from mrcnn.utils import visualize
 from mrcnn.models.components.anchors import generate_pyramid_anchors
 from mrcnn.models.components.detection_target import detection_target_layer
-from mrcnn.models.components.fpn import FPN, Classifier, Mask
+from mrcnn.models.components.fpn import FPN
+from mrcnn.models.components.classifier_head import Classifier
+from mrcnn.models.components.mask_head import Mask
 from mrcnn.models.components.resnet import ResNet
 from mrcnn.models.components.rpn import RPN
 from mrcnn.structs.mrcnn_ground_truth import MRCNNGroundTruth
@@ -34,6 +36,7 @@ from mrcnn.structs.mrcnn_output import MRCNNOutput
 from mrcnn.structs.rpn_output import RPNOutput
 from mrcnn.structs.rpn_target import RPNTarget
 from tools.config import Config
+from tools.time_profiling import profilable
 
 
 class MaskRCNN(nn.Module):
@@ -246,9 +249,14 @@ class MaskRCNN(nn.Module):
         molded_images = molded_images.to(Config.DEVICE).float()
 
         # Run object detection
+        self.eval()
+        self.apply(self._set_bn_eval)
         with torch.no_grad():
-            detections, mrcnn_masks = self._predict(molded_images, image_metas,
-                                                    mode='inference')
+            detections, mrcnn_masks = self._predict(
+                molded_images,
+                image_metas,
+                Config.PROPOSALS.POST_NMS_ROIS.INFERENCE,
+                mode='inference')
 
         mrcnn_masks = mrcnn_masks.permute(0, 1, 3, 4, 2)
 
@@ -274,6 +282,7 @@ class MaskRCNN(nn.Module):
         if classname.find('BatchNorm') != -1:
             model.eval()
 
+    @profilable
     def _foreground_background_layer(self, molded_images):
 
         # Feature extraction
@@ -324,20 +333,12 @@ class MaskRCNN(nn.Module):
 
         return detections, mrcnn_mask
 
-    def _predict(self, molded_images, image_metas, mode='training', gt=None):
+    @profilable
+    def _predict(self, molded_images, image_metas, proposal_count,
+                 mode='training', gt=None):
 
         if mode not in ['inference', 'training']:
             raise ValueError(f"mode {mode} not accepted.")
-
-        if mode == 'inference':
-            self.eval()
-            proposal_count = Config.PROPOSALS.POST_NMS_ROIS.INFERENCE
-        elif mode == 'training':
-            self.train()
-            proposal_count = Config.PROPOSALS.POST_NMS_ROIS.TRAINING
-
-        # Set batchnorm always in eval mode during training
-        self.apply(self._set_bn_eval)
 
         mrcnn_feature_maps, rpn_out = \
             self._foreground_background_layer(molded_images)
@@ -446,15 +447,18 @@ class MaskRCNN(nn.Module):
             {'params': trainables_only_bn}
         ], lr=learning_rate, momentum=Config.TRAINING.LEARNING.MOMENTUM)
 
+        self.train()
+        self.apply(self._set_bn_eval)
+
         for epoch in range(self.epoch+1, epochs+1):
             utils.log("Epoch {}/{}.".format(epoch, epochs))
 
             # Training
-            train_losses = self.train_epoch(train_generator, optimizer)
+            train_losses = self._train_epoch(train_generator, optimizer)
 
             # Validation
             with torch.no_grad():
-                val_losses = self.validation_epoch(val_generator)
+                val_losses = self._validation_epoch(val_generator)
 
             # Statistics
             self.loss_history.append(train_losses)
@@ -468,7 +472,7 @@ class MaskRCNN(nn.Module):
 
         self.epoch = epochs
 
-    def train_epoch(self, datagenerator, optimizer):
+    def _train_epoch(self, datagenerator, optimizer):
         """Trains a single epoch."""
         losses_sum = Losses()
         steps = Config.TRAINING.STEPS_PER_EPOCH
@@ -486,7 +490,11 @@ class MaskRCNN(nn.Module):
 
             # Run object detection
             rpn_out, mrcnn_targets, mrcnn_outs = \
-                self._predict(images, image_metas, gt=gt)
+                self._predict(
+                    images,
+                    image_metas,
+                    Config.PROPOSALS.POST_NMS_ROIS.TRAINING,
+                    gt=gt)
             del images, image_metas, gt
 
             # Compute losses
@@ -511,7 +519,7 @@ class MaskRCNN(nn.Module):
 
         return losses_sum
 
-    def validation_epoch(self, datagenerator):
+    def _validation_epoch(self, datagenerator):
         """Validation step. Usually called with torch.no_grad()."""
         losses_sum = Losses()
         steps = Config.TRAINING.VALIDATION_STEPS
@@ -525,7 +533,11 @@ class MaskRCNN(nn.Module):
             images, image_metas, rpn_target, gt = self._prepare_inputs(inputs)
 
             # Run object detection
-            outputs = self._predict(images, image_metas, gt=gt)
+            outputs = self._predict(
+                images,
+                image_metas,
+                Config.PROPOSALS.POST_NMS_ROIS.TRAINING,
+                gt=gt)
 
             # Compute losses
             losses = compute_losses(rpn_target, *outputs)

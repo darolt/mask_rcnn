@@ -47,8 +47,7 @@ def _to_input_domain(rois, probs, deltas, image_meta):
 
     # Apply bounding box deltas
     # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
-    deltas_specific = (deltas_specific *
-                       Config.RPN.BBOX_STD_DEV.to(Config.DEVICE))
+    deltas_specific = (deltas_specific*Config.RPN.BBOX_STD_DEV_GPU)
     refined_rois = utils.apply_box_deltas(rois.unsqueeze(0),
                                           deltas_specific.unsqueeze(0))
     refined_rois = refined_rois.squeeze(0)

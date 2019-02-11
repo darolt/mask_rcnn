@@ -12,7 +12,7 @@
 
 
 // CUDA forward declarations
-at::Tensor nms_cuda(const at::Tensor boxes,
+at::Tensor nms_cuda(const at::Tensor& boxes,
                     const float threhsold,
                     const int nb_max_proposals);
 

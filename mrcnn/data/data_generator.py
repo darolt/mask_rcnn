@@ -6,6 +6,7 @@ import numpy as np
 from mrcnn.utils import utils
 from mrcnn.models.components import anchors
 from tools.config import Config
+from tools.time_profiling import profilable
 
 
 # Augmentors that are safe to apply to masks
@@ -201,7 +202,7 @@ def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes):
             np.log(gt_w / a_w),
         ]
         # Normalize
-        rpn_bbox[ix] /= Config.RPN.BBOX_STD_DEV.squeeze(0).numpy()
+        rpn_bbox[ix] /= Config.RPN.BBOX_STD_DEV
         ix += 1
 
     return rpn_match, rpn_bbox
@@ -256,6 +257,7 @@ class DataGenerator(Dataset):
                                                         Config.RPN.ANCHOR.STRIDE)
         self.anchors = torch.from_numpy(self.anchors)
 
+    @profilable
     def __getitem__(self, image_index):
         # Get GT bounding boxes and masks for image.
         image_id = self.image_ids[image_index]

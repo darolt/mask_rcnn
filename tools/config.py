@@ -67,6 +67,7 @@ class Config(metaclass=MetaConfig):
         if not Config._DEFAULT_LOADED:
             raise Exception('Default configuration should be loaded '
                             'before loading actual configurations')
+        # TODO check if attributes exist in default
         cls._load(config_fn)
 
     @classmethod
@@ -119,9 +120,6 @@ class Config(metaclass=MetaConfig):
         """
         if isinstance(value, dict):  # parent has children
             for child_name, child_value in value.items():
-                # print(child_name)
-                # print(child_value)
-                # print(type(child_value))
                 if isinstance(child_value, dict):
                     child_node = Config.ConfigNode()
                     if not hasattr(parent, child_name):

@@ -1,13 +1,16 @@
+
 import logging
 
 import torch
 
-from mrcnn.utils import utils
-from mrcnn.structs.mrcnn_target import MRCNNTarget
 from mrcnn.models.components.roialign.crop_and_resize import CropAndResizeFunction
+from mrcnn.structs.mrcnn_target import MRCNNTarget
+from mrcnn.utils import utils
 from tools.config import Config
+from tools.time_profiling import profilable
 
 
+@profilable
 def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
     """Subsamples proposals and generates target box refinement, class_ids,
     and masks for each.
@@ -52,10 +55,10 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
 
         positive_count = int(Config.PROPOSALS.TRAIN_ROIS_PER_IMAGE *
                              Config.PROPOSALS.ROI_POSITIVE_RATIO)
-        rand_idx = torch.randperm(positive_indices.size()[0])
+        rand_idx = torch.randperm(positive_indices.shape[0])
         rand_idx = rand_idx[:positive_count].to(Config.DEVICE)
         positive_indices = positive_indices[rand_idx]
-        positive_count = positive_indices.size()[0]
+        positive_count = positive_indices.shape[0]
         positive_rois = proposals[positive_indices, :]
 
         # Assign positive ROIs to GT boxes.
@@ -88,7 +91,7 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
             y2 = (y2 - gt_y1) / gt_h
             x2 = (x2 - gt_x1) / gt_w
             boxes = torch.cat([y1, x1, y2, x2], dim=1)
-        box_ids = (torch.arange(roi_masks.size()[0]).int()
+        box_ids = (torch.arange(roi_masks.shape[0]).int()
                    .to(Config.DEVICE))
         masks = CropAndResizeFunction(
             Config.HEADS.MASK.SHAPE[0],
@@ -112,10 +115,10 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
         negative_indices = torch.nonzero(negative_roi_bool)[:, 0]
         r = 1.0 / Config.PROPOSALS.ROI_POSITIVE_RATIO
         negative_count = int(r * positive_count - positive_count)
-        rand_idx = torch.randperm(negative_indices.size()[0])
+        rand_idx = torch.randperm(negative_indices.shape[0])
         rand_idx = rand_idx[:negative_count].to(Config.DEVICE)
         negative_indices = negative_indices[rand_idx]
-        negative_count = negative_indices.size()[0]
+        negative_count = negative_indices.shape[0]
         negative_rois = proposals[negative_indices, :]
     else:
         negative_count = 0
@@ -166,8 +169,8 @@ def _bbox_overlaps(boxes1, boxes2):
     """
     # 1. Tile boxes2 and repeat boxes1. This allows us to compare
     # every box1 against every box2 without loops.
-    boxes1_repeat = boxes2.size()[0]
-    boxes2_repeat = boxes1.size()[0]
+    boxes1_repeat = boxes2.shape[0]
+    boxes2_repeat = boxes1.shape[0]
     boxes1 = boxes1.repeat(1, boxes1_repeat).view(-1, 4)
     boxes2 = boxes2.repeat(boxes2_repeat, 1)
 
@@ -178,7 +181,7 @@ def _bbox_overlaps(boxes1, boxes2):
     x1 = torch.max(b1_x1, b2_x1)[:, 0]
     y2 = torch.min(b1_y2, b2_y2)[:, 0]
     x2 = torch.min(b1_x2, b2_x2)[:, 0]
-    zeros = torch.zeros(y1.size()[0], requires_grad=False, dtype=torch.float32,
+    zeros = torch.zeros(y1.shape[0], requires_grad=False, dtype=torch.float32,
                         device=Config.DEVICE)
     intersection = torch.max(x2 - x1, zeros) * torch.max(y2 - y1, zeros)
 
@@ -214,7 +217,7 @@ def _handle_crowds(proposals, gt_class_ids, gt_boxes, gt_masks):
         crowd_iou_max = torch.max(crowd_overlaps, dim=1)[0]
         no_crowd_bool = crowd_iou_max < 0.001
     else:
-        no_crowd_bool = torch.tensor(proposals.size()[0]*[True],
+        no_crowd_bool = torch.tensor(proposals.shape[0]*[True],
                                      dtype=torch.uint8,
                                      device=Config.DEVICE,
                                      requires_grad=False)
