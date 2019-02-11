@@ -239,8 +239,7 @@ class MaskRCNN(nn.Module):
         """
 
         # Mold inputs to format expected by the neural network
-        molded_images, image_metas, windows = utils.mold_inputs(images,
-                                                                Config)
+        molded_images, image_metas, windows = utils.mold_inputs(images)
 
         # Convert images to torch tensor
         molded_images = torch.from_numpy(molded_images.transpose(0, 3, 1, 2))

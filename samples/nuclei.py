@@ -34,7 +34,7 @@ from mrcnn.actions.compute_metric import compute_metric
 from mrcnn.actions.train import train
 from mrcnn.actions.detect import detect
 
-from mrcnn import mrcnn_config
+from mrcnn.config import mrcnn_config
 
 from mrcnn.utils.mrcnn_parser import MRCNNParser
 from mrcnn.models import model as modellib

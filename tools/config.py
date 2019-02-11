@@ -29,7 +29,7 @@ class Config(metaclass=MetaConfig):
         Get:
             Config.ATTRIBUTE1.ATTRIBUTE1_1.ATTRIBUTE1_1_1
         """
-    DEFAULT_CONFIG_FN = './mrcnn/base_config.yml'
+    DEFAULT_CONFIG_FN = './mrcnn/config/base_config.yml'
     _FROZEN = False
 
     _DEFAULT_LOADED = False
