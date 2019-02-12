@@ -7,9 +7,7 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import datetime
 import logging
-import os
 import re
 
 import numpy as np
@@ -24,6 +22,7 @@ from mrcnn.models.components.detection import detection_layer
 from mrcnn.data.data_generator import DataGenerator
 from mrcnn.functions.losses import Losses, compute_losses
 from mrcnn.utils import visualize
+from mrcnn.utils.model_utils import set_log_dir
 from mrcnn.models.components.anchors import generate_pyramid_anchors
 from mrcnn.models.components.detection_target import detection_target_layer
 from mrcnn.models.components.fpn import FPN
@@ -60,7 +59,7 @@ class MaskRCNN(nn.Module):
         """
         super(MaskRCNN, self).__init__()
         self.model_dir = model_dir
-        self.set_log_dir()
+        set_log_dir(self)
         self.build()
         self.initialize_weights()
         self.loss_history = []
@@ -120,8 +119,7 @@ class MaskRCNN(nn.Module):
         self.apply(set_bn_fix)
 
     def initialize_weights(self):
-        """Initialize model weights.
-        """
+        """Initialize model weights."""
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
                 nn.init.xavier_uniform_(m.weight)
@@ -145,86 +143,6 @@ class MaskRCNN(nn.Module):
                 param[1].requires_grad = False
             else:
                 param[1].requires_grad = True
-
-    def set_log_dir(self, model_path=None):
-        """Sets the model log directory and epoch counter.
-
-        model_path: If None, or a format different from what this code uses
-            then set a new log directory and start epochs from 0. Otherwise,
-            extract the log directory and the epoch counter from the file
-            name.
-        """
-        # Set date and epoch counter as if starting a new model
-        self.epoch = 0
-        now = datetime.datetime.now()
-
-        # If we have a model path with date and epochs use them
-        if model_path:
-            # Continue from we left of. Get epoch and date from the file name
-            # A sample model path might look like:
-            # /path/to/logs/coco20171029T2315/mask_rcnn_coco_0001.h5
-            regex = r".*/\w+(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})/mask\_rcnn\_\w+(\d{4})\.pth"
-            m = re.match(regex, model_path)
-            if m:
-                now = datetime.datetime(int(m.group(1)), int(m.group(2)),
-                                        int(m.group(3)), int(m.group(4)),
-                                        int(m.group(5)))
-                self.epoch = int(m.group(6))
-
-        # Directory for training logs
-        self.log_dir = os.path.join(self.model_dir, "{}{:%Y%m%d_%H%M}".format(
-            Config.NAME.lower(), now))
-
-        # Path to save after each epoch. Include placeholders that get
-        # filled by Keras.
-        checkpoint_file = "mask_rcnn_"+Config.NAME.lower()+"_{}.pth"
-
-        self.checkpoint_path = os.path.join(self.log_dir, checkpoint_file)
-
-    def find_last(self):
-        """Finds the last checkpoint file of the last trained model in the
-        model directory.
-        Returns:
-            log_dir: The directory where events and weights are saved
-            checkpoint_path: the path to the last checkpoint file
-        """
-        # Get directory names. Each directory corresponds to a model
-        dir_names = next(os.walk(self.model_dir))[1]
-        key = Config.NAME.lower()
-        dir_names = filter(lambda f: f.startswith(key), dir_names)
-        dir_names = sorted(dir_names)
-        if not dir_names:
-            return None, None
-        # Pick last directory
-        dir_name = os.path.join(self.model_dir, dir_names[-1])
-        # Find the last checkpoint
-        checkpoints = next(os.walk(dir_name))[2]
-        checkpoints = filter(lambda f: f.startswith("mask_rcnn"), checkpoints)
-        checkpoints = sorted(checkpoints)
-        if not checkpoints:
-            return dir_name, None
-        checkpoint = os.path.join(dir_name, checkpoints[-1])
-        return dir_name, checkpoint
-
-    def load_weights(self, filepath, exclude=None):
-        """Modified version of the correspoding Keras function with
-        the addition of multi-GPU support and the ability to exclude
-        some layers from loading.
-        exlude: list of layer names to excluce
-        """
-        if os.path.exists(filepath):
-            state_dict = torch.load(filepath)
-            if exclude:
-                state_dict = {key: value for key, value in state_dict.items()
-                              if key not in exclude}
-            self.load_state_dict(state_dict, strict=False)
-        else:
-            print("Weight file not found ...")
-
-        # Update the log directory
-        self.set_log_dir(filepath)
-        if not os.path.exists(self.log_dir):
-            os.makedirs(self.log_dir)
 
     def detect(self, images):
         """Runs the detection pipeline.

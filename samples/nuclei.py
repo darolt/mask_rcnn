@@ -37,6 +37,7 @@ from mrcnn.actions.detect import detect
 from mrcnn.config import mrcnn_config
 
 from mrcnn.utils.mrcnn_parser import MRCNNParser
+from mrcnn.utils.model_utils import load_weights
 from mrcnn.models import model as modellib
 
 from tools.config import Config
@@ -97,9 +98,9 @@ if __name__ == '__main__':
                    'classifier.linear_bbox.bias',
                    'mask.conv5.weight',
                    'mask.conv5.bias']
-        model.load_weights(model_path, exclude=EXCLUDE)
+        load_weights(model, model_path, exclude=EXCLUDE)
     else:
-        model.load_weights(model_path)
+        load_weights(model, model_path)
 
     if torch.cuda.device_count() > 0:
         with torch.cuda.device(args.dev):
