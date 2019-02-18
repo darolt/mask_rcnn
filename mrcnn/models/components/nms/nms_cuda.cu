@@ -49,6 +49,7 @@ __global__ void compute_iou_kernel(
     const int nb_col_blocks,
     const int nb_elements_tri) {
 
+  // map linear grid to rectangular grid
   int row_idx = blockIdx.x / nb_col_blocks;
   int col_idx = blockIdx.x % nb_col_blocks;
   const int img_idx = blockIdx.y;
@@ -62,6 +63,7 @@ __global__ void compute_iou_kernel(
   const int col_size = min(nb_boxes - col_idx*block_size, block_size);
   int img_addr = img_idx*nb_boxes;
 
+  // copy to block shared memory
   __shared__ float block_boxes[block_size*4];
   if (thread_idx < col_size) {
     int block_addr = col_idx*block_size;
@@ -72,6 +74,7 @@ __global__ void compute_iou_kernel(
   __syncthreads();
 
   if ((thread_idx < row_size)) {
+    // compute iou
     int block_addr = img_addr + row_idx*block_size + thread_idx;
     const float *cur_box = &dev_boxes[block_addr*4];
     unsigned long long t = 0;
@@ -82,6 +85,7 @@ __global__ void compute_iou_kernel(
         t |= 1ULL << i;
       }
     }
+    // map rectangular grid back to linear grid
     int new_img_idx = img_idx*nb_elements_tri*block_size;
     int new_idx = thread_idx*nb_elements_tri + blockIdx.x;
     iou_matrix[new_img_idx + new_idx] = t;
@@ -113,7 +117,6 @@ void compute_nms(
       unsigned long long *p = &iou_matrix_host[0] +
                               thread_idx*nb_elements_tri*block_size +
                               inblock*nb_elements_tri;
-
       for (int j = nblock; j < nb_col_blocks; j++) {
         int linear_idx = nblock*nb_col_blocks + j%nb_col_blocks;
         suppress[j] |= p[linear_idx];
@@ -135,7 +138,7 @@ at::Tensor nms_cuda(const at::Tensor& boxes,
 
   // compute triangular number
   int nb_elements_tri = 0;
-  for (int i=0; i < nb_col_blocks; i++)
+  for (int i=0; i <= nb_col_blocks; i++)
     nb_elements_tri += i;
   int pivot_row = nb_elements_tri/nb_col_blocks;
   int pivot_col = nb_elements_tri % nb_col_blocks;
@@ -157,12 +160,12 @@ at::Tensor nms_cuda(const at::Tensor& boxes,
   THCudaCheck(cudaMemcpy(&iou_matrix_host[0], iou_matrix,
                          iou_matrix_size_bytes, cudaMemcpyDeviceToHost));
   THCudaFree(state, iou_matrix);
-
   at::Tensor keep = at::empty({batch_size, nb_max_proposals},
                               boxes.options().dtype(at::kLong)
                                              .device(at::kCPU)
                                              .requires_grad(false));
-
+  // maybe there are not enough proposals, so we indicate this with -1
+  keep.fill_(-1);
   std::thread threads[batch_size];
   for (int img_idx=0; img_idx < batch_size; img_idx++) {
     threads[img_idx] = std::thread(
@@ -179,6 +182,5 @@ at::Tensor nms_cuda(const at::Tensor& boxes,
   for (auto& thread: threads) {
     thread.join();
   }
-
   return keep.to(boxes.device());
 }

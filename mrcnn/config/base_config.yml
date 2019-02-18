@@ -7,6 +7,8 @@ DEVICE: cpu
 # experiment is running.
 NAME: None  # Override in sub-classes
 
+DATASET_PATH: None  # By default it is passed through the command line
+
 # Path to pretrained imagenet model
 IMAGENET_FILE_NAME: resnet50_imagenet.pth
 

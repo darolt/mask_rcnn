@@ -180,17 +180,10 @@ class MaskRCNN(nn.Module):
         # Process detections
         results = []
         for i, image in enumerate(images):
-            final_rois, final_class_ids, final_scores, final_masks =\
-                utils.unmold_detections(detections[i], mrcnn_masks[i],
-                                        image.shape, windows[i])
-            results.append({
-                "rois": final_rois,
-                "class_ids": final_class_ids,
-                "scores": final_scores,
-                "masks": final_masks,
-                "detections": detections,
-                "mrcnn_masks": mrcnn_masks,
-            })
+            result = utils.unmold_detections(
+                detections[i], mrcnn_masks[i], image.shape, windows[i])
+            results.append(result)
+        # TODO, fix it
         return results[0], image_metas
 
     @staticmethod
@@ -227,6 +220,7 @@ class MaskRCNN(nn.Module):
     def _inference(self, mrcnn_feature_maps, rpn_rois, image_metas):
         # Network Heads
         # Proposal classifier and BBox regressor heads
+        logging.debug(f"Infering.")
         mrcnn_feature_maps_batch = [x[0].unsqueeze(0)
                                     for x in mrcnn_feature_maps]
         _, mrcnn_class, mrcnn_deltas = \

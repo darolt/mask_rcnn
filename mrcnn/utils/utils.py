@@ -21,6 +21,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from mrcnn.structs.detection_output import DetectionOutput
 from tools.config import Config
 
 
@@ -294,7 +295,10 @@ def unmold_detections(detections, mrcnn_mask, image_shape, window):
     scores = detections[:N, 5]
     masks = mrcnn_mask[torch.arange(N, dtype=torch.long), :, :, class_ids]
 
-    return unmold_boxes(boxes, class_ids, masks, image_shape, window, scores)
+    final_rois, final_class_ids, final_scores, final_masks = \
+        unmold_boxes(boxes, class_ids, masks, image_shape, window, scores)
+    return DetectionOutput(final_rois, final_class_ids, final_scores,
+                           final_masks)
 
 
 def unmold_detections_x(detections, mrcnn_mask, image_shape, window):
@@ -450,9 +454,11 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
 
     # Resize image using bilinear interpolation
     if scale != 1:
-        image = skimage.transform.resize(
-            image, (round(h * scale), round(w * scale)),
-            order=1, mode="constant", preserve_range=True)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            image = skimage.transform.resize(
+                image, (round(h * scale), round(w * scale)),
+                order=1, mode="constant", preserve_range=True)
 
     # Need padding or cropping?
     h, w = image.shape[:2]
@@ -536,7 +542,10 @@ def minimize_masks(boxes, masks, mini_shape):
         m = m[y1:y2, x1:x2]
         if m.size == 0:
             raise Exception("Invalid bounding box with area of zero")
-        m = skimage.transform.resize(m, mini_shape, order=1, mode="constant")
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            m = skimage.transform.resize(m, mini_shape, order=1,
+                                         mode="constant")
         mini_masks[:, :, i] = np.around(m).astype(np.bool)
     return mini_masks
 
@@ -570,8 +579,8 @@ def unmold_mask(mask, bbox, image_shape):
     y1, x1, y2, x2 = bbox
     shape = (y2 - y1, x2 - x1)
 
-    mask = F.upsample(mask.unsqueeze(0).unsqueeze(0), size=shape,
-                      mode='bilinear', align_corners=True)
+    mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=shape,
+                         mode='bilinear', align_corners=True)
     mask = mask.squeeze(0).squeeze(0)
     mask = torch.where(mask >= threshold,
                        torch.tensor(1, device=Config.DEVICE),
@@ -608,8 +617,8 @@ def unmold_mask_x(mask, bbox, image_shape):
     y1, x1, y2, x2 = bbox.floor()
     shape = (y2 - y1, x2 - x1)
 
-    mask = F.upsample(mask.unsqueeze(0).unsqueeze(0), size=shape,
-                      mode='bilinear', align_corners=True)
+    mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=shape,
+                         mode='bilinear', align_corners=True)
     mask = mask.squeeze(0).squeeze(0)
     mask = ((mask - 0.5)*100).sigmoid()
     return mask
@@ -736,18 +745,7 @@ def log(text, array=None):
 #  Pytorch Utility Functions
 ############################################################
 
-
-def unique1d(tensor):
-    if tensor.size()[0] == 0 or tensor.size()[0] == 1:
-        return tensor
-    tensor = tensor.sort()[0]
-    unique_bool = tensor[1:] != tensor[:-1]
-    first_element = torch.ByteTensor([True])
-    first_element = first_element.to(Config.DEVICE)
-    unique_bool = torch.cat((first_element, unique_bool), dim=0)
-    return tensor[unique_bool.detach()]
-
-
+# TODO: this may not work if element repeats more than 2 times
 def intersect1d(tensor1, tensor2):
     aux = torch.cat((tensor1, tensor2), dim=0)
     aux = aux.sort()[0]
@@ -755,8 +753,7 @@ def intersect1d(tensor1, tensor2):
 
 
 class SamePad2d(nn.Module):
-    """Mimics tensorflow's 'SAME' padding.
-    """
+    """Mimics tensorflow's 'SAME' padding."""
 
     def __init__(self, kernel_size, stride):
         super(SamePad2d, self).__init__()

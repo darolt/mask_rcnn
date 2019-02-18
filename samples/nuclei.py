@@ -16,7 +16,7 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
     python samples/nuclei.py train --dataset=/home/jro/wk/kaggle/input/ --model=coco
 
     # Detect nuclei from dataset, example:
-    python samples/nuclei.py detect --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
+    python samples/nuclei.py submit --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
 
     # Get Kaggle's 2018 Databowl metric from dataset, example:
     python samples/nuclei.py metric --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
@@ -32,7 +32,7 @@ import torch
 from samples.nucleus_dataset_handler import NucleusDatasetHandler
 from mrcnn.actions.compute_metric import compute_metric
 from mrcnn.actions.train import train
-from mrcnn.actions.detect import detect
+from mrcnn.actions.submit import submit
 
 from mrcnn.config import mrcnn_config
 
@@ -111,12 +111,12 @@ if __name__ == '__main__':
             dataset_train = NucleusDatasetHandler(args.dataset, 'train')
             dataset_val = NucleusDatasetHandler(args.dataset, "val")
             train(model, dataset_train, dataset_val)
-        elif args.command == "detect":
-            dataset = NucleusDatasetHandler(args.dataset, 'val')
-            detect(model, dataset, RESULTS_DIR)
+        elif args.command == "submit":
+            dataset = NucleusDatasetHandler(args.dataset, 'stage1_test')
+            submit(model, dataset, RESULTS_DIR)
         elif args.command == "metric":
             dataset = NucleusDatasetHandler(args.dataset, 'stage1_test')
             compute_metric(model, dataset)
         else:
-            print(f"'{args.command}' is not recognized. Use 'train', 'detect'"
+            print(f"'{args.command}' is not recognized. Use 'train', 'submit'"
                   f" or 'metric'")

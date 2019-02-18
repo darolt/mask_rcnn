@@ -1,3 +1,5 @@
+
+import logging
 import numpy as np
 import torch
 
@@ -69,26 +71,30 @@ def _apply_nms(class_ids, class_scores, refined_rois, keep):
     pre_nms_class_ids = class_ids[keep]
     pre_nms_scores = class_scores[keep]
     pre_nms_rois = refined_rois[keep]
-    for i, class_id in enumerate(utils.unique1d(pre_nms_class_ids)):
+    for i, class_id in enumerate(pre_nms_class_ids.unique()):
         # Pick detections of this class
-        ixs = torch.nonzero(pre_nms_class_ids.squeeze(0) == class_id)[:, 0]
-        class_rois = pre_nms_rois[ixs]
-        class_scores = pre_nms_scores[ixs]
+        class_idxs = (pre_nms_class_ids == class_id).nonzero().squeeze(1)
+        class_rois = pre_nms_rois[class_idxs]
+        class_scores = pre_nms_scores[class_idxs]
         # Sort
         class_scores, order = class_scores.sort(descending=True)
         class_rois = class_rois[order, :]
 
-        class_keep = nms_wrapper.nms_wrapper(
-            torch.cat((class_rois, class_scores.unsqueeze(1)), dim=1),
-            Config.DETECTION.NMS_THRESHOLD)
+        class_keep = nms_wrapper.nms_indexes(
+            class_rois.unsqueeze(0),
+            class_scores.unsqueeze(0),
+            Config.DETECTION.NMS_THRESHOLD,
+            class_rois.shape[0]).squeeze(0)
 
+        # remove some boxes that were deleted by NMS
+        class_keep = class_keep[class_keep != -1]
         # Map indices
-        class_keep = keep[ixs[order[class_keep]]]
+        class_keep = keep[class_idxs[order[class_keep]]]
 
         if i == 0:
             nms_keep = class_keep
         else:
-            nms_keep = utils.unique1d(torch.cat((nms_keep, class_keep)))
+            nms_keep = (torch.cat((nms_keep, class_keep))).unique()
     keep = utils.intersect1d(keep, nms_keep)
     return keep
 
@@ -111,21 +117,21 @@ def detection_layer(rois, probs, deltas, image_meta):
     refined_rois, class_ids, class_scores = det_out
 
     # Filter out background boxes
-    keep_bool = class_ids > 0
+    keep_fg = class_ids > 0
 
     # Filter out low confidence boxes
     if Config.DETECTION.MIN_CONFIDENCE:
         greater_scores = class_scores >= Config.DETECTION.MIN_CONFIDENCE
-        keep_bool = keep_bool & greater_scores
-    keep = torch.nonzero(keep_bool)[:, 0]
+        keep_fg = keep_fg & greater_scores
+    keep = keep_fg.nonzero().squeeze(1)
 
     # Apply per-class NMS
     keep = _apply_nms(class_ids, class_scores, refined_rois, keep)
 
     # Keep top detections
     roi_count = Config.DETECTION.MAX_INSTANCES
-    top_ids = class_scores[keep].sort(descending=True)[1][:roi_count]
-    keep = keep[top_ids]
+    top_scores_idxs = class_scores[keep].sort(descending=True)[1][:roi_count]
+    keep = keep[top_scores_idxs]
 
     # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]
     # Coordinates are in image domain.

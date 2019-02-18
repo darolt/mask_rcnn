@@ -14,8 +14,8 @@ import nms_wrapper
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
-NMS_INPUT = 'nms_input.pt'
-NMS_OUTPUT = 'nms_output.pt'
+NMS_INPUT = './tests/nms_input.pt'
+NMS_OUTPUT = './tests/nms_output.pt'
 PROPOSAL_COUNT = 2000
 THRESHOLD = 0.9
 DEVICE = 1

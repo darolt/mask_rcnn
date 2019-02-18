@@ -7,7 +7,7 @@ def rle_encode(mask):
     """Encodes a mask in Run Length Encoding (RLE).
     Returns a string of space-separated values.
     """
-    assert mask.ndim == 2, "Mask must be of shape [Height, Width]"
+    assert mask.ndim == 2, 'Mask must be of shape [Height, Width]'
     # Flatten it column wise
     m = mask.T.flatten()
     # Compute gradient. Equals 1 or -1 at transition points
@@ -29,7 +29,7 @@ def rle_decode(rle, shape):
     mask = np.zeros([shape[0] * shape[1]], np.bool)
     for s, e in rle:
         assert 0 <= s < mask.shape[0]
-        assert 1 <= e <= mask.shape[0], "shape: {}  s {}  e {}".format(shape, s, e)
+        assert 1 <= e <= mask.shape[0], f"shape: {shape}  s {s}  e {e}"
         mask[s:e] = 1
     # Reshape and transpose
     mask = mask.reshape([shape[1], shape[0]]).T
@@ -37,8 +37,8 @@ def rle_decode(rle, shape):
 
 
 def mask_to_rle(image_id, mask, scores):
-    "Encodes instance masks to submission format."
-    assert mask.ndim == 3, "Mask must be [H, W, count]"
+    """Encodes instance masks to submission format."""
+    assert mask.ndim == 3, 'Mask must be [H, W, count]'
     # Remove mask overlaps
     # Multiply each instance mask by its score order
     # then take the maximum across the last dimension
@@ -52,5 +52,5 @@ def mask_to_rle(image_id, mask, scores):
         if m.sum() == 0.0:
             continue
         rle = rle_encode(m)
-        lines.append("{}, {}".format(image_id, rle))
+        lines.append(f"{image_id}, {rle}")
     return "\n".join(lines)
