@@ -1,4 +1,9 @@
+"""
+This module is used for profiling CPU and GPU times.
 
+Licensed under The MIT License
+Written by Jean Da Rolt
+"""
 import os
 from timeit import default_timer as timer
 

@@ -7,6 +7,7 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
+import logging
 import math
 import random
 import shutil
@@ -22,6 +23,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mrcnn.structs.detection_output import DetectionOutput
+from mrcnn.utils.image_metas import ImageMetas
 from tools.config import Config
 
 
@@ -193,7 +195,7 @@ def mold_image(image):
     the mean pixel and converts it to float. Expects image
     colors in RGB order.
     """
-    molded_image, window, scale, padding, crop = resize_image(
+    molded_image, image_metas = resize_image(
         image,
         min_dim=Config.IMAGE.MIN_DIM,
         max_dim=Config.IMAGE.MAX_DIM,
@@ -201,39 +203,7 @@ def mold_image(image):
         mode=Config.IMAGE.RESIZE_MODE)
     molded_image = subtract_mean(molded_image)
 
-    return molded_image, window, scale, padding, crop
-
-
-def compose_image_meta(image_id, image_shape, window, active_class_ids):
-    """Takes attributes of an image and puts them in one 1D array. Use
-    parse_image_meta() to parse the values back.
-
-    image_id: An int ID of the image. Useful for debugging.
-    image_shape: [height, width, channels]
-    window: (y1, x1, y2, x2) in pixels. The area of the image where the real
-            image is (excluding the padding)
-    active_class_ids: List of class_ids available in the dataset from which
-        the image came. Useful if training on images from multiple datasets
-        where not all classes are present in all datasets.
-    """
-    meta = np.array(
-        [image_id]                # size=1
-        + list(image_shape)       # size=3
-        + list(window)            # size=4 (y1, x1, y2, x2) in image coordinates
-        + list(active_class_ids)  # size=num_classes
-    )
-    return meta
-
-
-def parse_image_meta(meta):
-    """Parses an image info Numpy array to its components.
-    See compose_image_meta() for more details.
-    """
-    image_id = meta[:, 0]
-    image_shape = meta[:, 1:4]
-    window = meta[:, 4:8]   # (y1, x1, y2, x2) window of image in in pixels
-    active_class_ids = meta[:, 8:]
-    return image_id, image_shape, window, active_class_ids
+    return molded_image, image_metas
 
 
 def mold_inputs(images):
@@ -249,27 +219,27 @@ def mold_inputs(images):
         original image (padding excluded).
     """
     molded_images = []
-    image_metas = []
-    windows = []
+    images_metas = []
+    # windows = []
     for image in images:
         # Resize image to fit the model expected size
-        molded_image, window, _, _, _ = mold_image(image)
+        molded_image, image_metas = mold_image(image)
         # Build image_meta
-        image_meta = compose_image_meta(
-            0, image.shape, window,
-            np.zeros([Config.NUM_CLASSES], dtype=np.int32))
+        # image_meta = compose_image_meta(
+            # 0, image.shape, window,
+            # np.zeros([Config.NUM_CLASSES], dtype=np.int32))
         # Append
         molded_images.append(molded_image)
-        windows.append(window)
-        image_metas.append(image_meta)
+        # windows.append(window)
+        images_metas.append(image_metas)
     # Pack into arrays
     molded_images = np.stack(molded_images)
-    image_metas = np.stack(image_metas)
-    windows = np.stack(windows)
-    return molded_images, image_metas, windows
+    # image_metas = np.stack(image_metas)
+    # windows = np.stack(windows)
+    return molded_images, image_metas
 
 
-def unmold_detections(detections, mrcnn_mask, image_shape, window):
+def unmold_detections(detections, mrcnn_mask, image_metas):
     """Reformats the detections of one image from the format of the neural
     network output to a format suitable for use in the rest of the
     application.
@@ -287,50 +257,21 @@ def unmold_detections(detections, mrcnn_mask, image_shape, window):
     scores: [N] Float probability scores of the class_id
     masks: [height, width, num_instances] Instance masks
     """
-    N = detections.shape[0]
+    nb_dets = detections.shape[0]
 
     # Extract boxes, class_ids, scores, and class-specific masks
-    boxes = detections[:N, :4]
-    class_ids = detections[:N, 4].to(torch.long)
-    scores = detections[:N, 5]
-    masks = mrcnn_mask[torch.arange(N, dtype=torch.long), :, :, class_ids]
+    boxes = detections[:nb_dets, :4]
+    class_ids = detections[:nb_dets, 4].to(torch.long)
+    scores = detections[:nb_dets, 5]
+    masks = mrcnn_mask[torch.arange(nb_dets, dtype=torch.long), :, :, class_ids]
 
     final_rois, final_class_ids, final_scores, final_masks = \
-        unmold_boxes(boxes, class_ids, masks, image_shape, window, scores)
+        unmold_boxes(boxes, class_ids, masks, image_metas, scores)
     return DetectionOutput(final_rois, final_class_ids, final_scores,
                            final_masks)
 
 
-def unmold_detections_x(detections, mrcnn_mask, image_shape, window):
-    """Reformats the detections of one image from the format of the neural
-    network output to a format suitable for use in the rest of the
-    application.
-
-    detections: [N, (y1, x1, y2, x2, class_id, score)]
-    mrcnn_mask: [N, height, width, num_classes]
-    image_shape: [height, width, depth] Original size of the image
-                 before resizing
-    window: [y1, x1, y2, x2] Box in the image where the real image is
-            excluding the padding.
-
-    Returns:
-    boxes: [N, (y1, x1, y2, x2)] Bounding boxes in pixels
-    class_ids: [N] Integer class IDs for each bounding box
-    scores: [N] Float probability scores of the class_id
-    masks: [height, width, num_instances] Instance masks
-    """
-    N = detections.shape[0]
-
-    # Extract boxes, class_ids, scores, and class-specific masks
-    boxes = detections[:N, :4]
-    class_ids = detections[:N, 4].to(torch.long)
-    scores = detections[:N, 5]
-    masks = mrcnn_mask[torch.arange(N, dtype=torch.long), :, :, class_ids]
-
-    return unmold_boxes_x(boxes, class_ids, masks, image_shape, window)
-
-
-def unmold_boxes(boxes, class_ids, masks, image_shape, window, scores=None):
+def unmold_boxes(boxes, class_ids, masks, image_metas, scores=None):
     """Reformats the detections of one image from the format of the neural
     network output to a format suitable for use in the rest of the
     application.
@@ -351,8 +292,9 @@ def unmold_boxes(boxes, class_ids, masks, image_shape, window, scores=None):
     # Extract boxes, class_ids, scores, and class-specific masks
     class_ids = class_ids.to(torch.long)
 
-    image_shape2 = (image_shape[0], image_shape[1])
-    boxes = to_img_domain(boxes, window, image_shape).to(torch.int32)
+    image_shape2 = (image_metas.original_shape[0],
+                    image_metas.original_shape[1])
+    boxes = to_img_domain(boxes, image_metas).to(torch.int32)
 
     boxes, class_ids, masks, scores = remove_zero_area(boxes, class_ids,
                                                        masks, scores)
@@ -360,36 +302,6 @@ def unmold_boxes(boxes, class_ids, masks, image_shape, window, scores=None):
     full_masks = unmold_masks(masks, boxes, image_shape2)
 
     return boxes, class_ids, scores, full_masks
-
-
-def unmold_boxes_x(boxes, class_ids, masks, image_shape, window, scores=None):
-    """Reformats the detections of one image from the format of the neural
-    network output to a format suitable for use in the rest of the
-    application.
-
-    detections: [N, (y1, x1, y2, x2, class_id, score)]
-    masks: [N, height, width]
-    image_shape: [height, width, depth] Original size of the image
-                 before resizing
-    window: [y1, x1, y2, x2] Box in the image where the real image is
-            excluding the padding.
-
-    Returns:
-    boxes: [N, (y1, x1, y2, x2)] Bounding boxes in pixels
-    class_ids: [N] Integer class IDs for each bounding box
-    scores: [N] Float probability scores of the class_id
-    masks: [height, width, num_instances] Instance masks
-    """
-    # Extract boxes, class_ids, scores, and class-specific masks
-    class_ids = class_ids.to(torch.long)
-
-    image_shape2 = (image_shape[0], image_shape[1])
-    boxes = to_img_domain(boxes, window, image_shape)
-
-    boxes, _, masks, _ = remove_zero_area(boxes, class_ids, masks)
-    full_masks = unmold_masks_x(masks, boxes, image_shape2)
-
-    return boxes, full_masks
 
 
 def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
@@ -429,13 +341,14 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
     image_dtype = image.dtype
     # Default window (y1, x1, y2, x2) and default scale == 1.
     h, w = image.shape[:2]
+    original_shape = image.shape
     window = (0, 0, h, w)
     scale = 1
     padding = [(0, 0), (0, 0), (0, 0)]
     crop = None
 
     if mode == "none":
-        return image, window, scale, padding, crop
+        return image, ImageMetas(0, original_shape, window, scale, padding, crop)
 
     # Scale?
     if min_dim and mode != "pad64":
@@ -443,7 +356,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         scale = max(1, min_dim / min(h, w))
     if min_scale:
         scale = max(scale, min_scale)
-    if mode == "pad64":
+    if mode == 'pad64':
         scale = min_dim/max(h, w)
 
     # Does it exceed max dim?
@@ -473,7 +386,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         window = (top_pad, left_pad, h + top_pad, w + left_pad)
     elif mode == "pad64":
         # Both sides must be divisible by 64
-        assert min_dim % 64 == 0, "Minimum dimension must be a multiple of 64"
+        assert min_dim % 64 == 0, 'Minimum dimension must be a multiple of 64'
         # Height
         if min_dim != h:
             # max_h = h - (min_dim % 64) + 64
@@ -502,8 +415,9 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         image = image[y:y + min_dim, x:x + min_dim]
         window = (0, 0, min_dim, min_dim)
     else:
-        raise Exception("Mode {} not supported".format(mode))
-    return image.astype(image_dtype), window, scale, padding, crop
+        raise Exception(f"Mode {mode} not supported")
+    return (image.astype(image_dtype),
+            ImageMetas(0, original_shape, window, scale, padding, crop))
 
 
 def resize_mask(mask, scale, padding, crop=None):
@@ -605,36 +519,6 @@ def unmold_masks(masks, boxes, image_shape):
     return full_masks
 
 
-def unmold_mask_x(mask, bbox, image_shape):
-    """Converts a mask generated by the neural network into a format similar
-    to its original shape.
-    mask: [height, width] of type float. A small, typically 28x28 mask.
-    bbox: [y1, x1, y2, x2]. The box to fit the mask in.
-
-    Returns a binary mask with the same size as the original image.
-    """
-    # threshold = 0.5
-    y1, x1, y2, x2 = bbox.floor()
-    shape = (y2 - y1, x2 - x1)
-
-    mask = F.interpolate(mask.unsqueeze(0).unsqueeze(0), size=shape,
-                         mode='bilinear', align_corners=True)
-    mask = mask.squeeze(0).squeeze(0)
-    mask = ((mask - 0.5)*100).sigmoid()
-    return mask
-
-
-def unmold_masks_x(masks, boxes, image_shape):
-    # Resize masks to original image size and set boundary threshold.
-    N = masks.shape[0]
-    full_masks = []
-    for i in range(N):
-        # Convert neural network mask to full size mask
-        full_mask = unmold_mask_x(masks[i], boxes[i], image_shape)
-        full_masks.append(full_mask)
-    return full_masks
-
-
 def remove_zero_area(boxes, class_ids, masks, scores=None):
     # Filter out detections with zero area. Often only happens in early
     # stages of training when the network weights are still a bit random.
@@ -655,10 +539,12 @@ def remove_zero_area(boxes, class_ids, masks, scores=None):
     return boxes, class_ids, masks, scores
 
 
-def to_img_domain(boxes, window, image_shape):
-    image_shape = torch.tensor(image_shape, dtype=torch.float32,
+def to_img_domain(boxes, image_metas):
+    image_shape = torch.tensor(image_metas.original_shape,
+                               dtype=torch.float32,
                                device=Config.DEVICE)
-    window = torch.tensor(window, dtype=torch.float32,
+    window = torch.tensor(image_metas.window,
+                          dtype=torch.float32,
                           device=Config.DEVICE)
     # Compute scale and shift to translate coordinates to image domain.
     h_scale = image_shape[0] / (window[2] - window[0])
@@ -715,30 +601,12 @@ def download_trained_weights(coco_model_path, verbose=1):
     coco_model_path: local path of COCO trained weights
     """
     if verbose > 0:
-        print("Downloading pretrained model to " + coco_model_path + " ...")
+        logging.info(f"Downloading pretrained model to {coco_model_path} ...")
     with urllib.request.urlopen(COCO_MODEL_URL) as resp:
         with open(coco_model_path, 'wb') as out:
             shutil.copyfileobj(resp, out)
     if verbose > 0:
-        print("... done downloading pretrained model!")
-
-
-############################################################
-#  Logging Utility Functions
-############################################################
-
-
-def log(text, array=None):
-    """Prints a text message. And, optionally, if a Numpy array is provided it
-    prints it's shape, min, and max values.
-    """
-    if array is not None:
-        text = text.ljust(25)
-        text += ("shape: {:20}  min: {:10.5f}  max: {:10.5f}".format(
-            str(array.shape),
-            array.min() if array.size else "",
-            array.max() if array.size else ""))
-    print(text)
+        logging.info('... done downloading pretrained model!')
 
 
 ############################################################

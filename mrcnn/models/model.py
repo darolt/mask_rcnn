@@ -132,7 +132,7 @@ class MaskRCNN(nn.Module):
                 m.weight.detach().normal_(0, 0.01)
                 m.bias.detach().zero_()
 
-    def set_trainable(self, layer_regex, model=None, indent=0, verbose=1):
+    def set_trainable(self, layer_regex):
         """Sets model layers as trainable if their names match
         the given regular expression.
         """
@@ -144,10 +144,10 @@ class MaskRCNN(nn.Module):
             else:
                 param[1].requires_grad = True
 
-    def detect(self, images):
+    def detect(self, image):
         """Runs the detection pipeline.
 
-        images: List of images, potentially of different sizes.
+        images: Image
 
         Returns a list of dicts, one dict per image. The dict contains:
         rois: [N, (y1, x1, y2, x2)] detection bounding boxes
@@ -157,34 +157,30 @@ class MaskRCNN(nn.Module):
         """
 
         # Mold inputs to format expected by the neural network
-        molded_images, image_metas, windows = utils.mold_inputs(images)
+        molded_image, image_metas = utils.mold_inputs([image])
 
         # Convert images to torch tensor
-        molded_images = torch.from_numpy(molded_images.transpose(0, 3, 1, 2))
+        molded_image = torch.from_numpy(molded_image.transpose(0, 3, 1, 2))
 
         # To GPU
-        molded_images = molded_images.to(Config.DEVICE).float()
+        molded_image = molded_image.to(Config.DEVICE).float()
 
         # Run object detection
         self.eval()
         self.apply(self._set_bn_eval)
         with torch.no_grad():
             detections, mrcnn_masks = self._predict(
-                molded_images,
-                image_metas,
+                molded_image,
+                image_metas.to_numpy(),
                 Config.PROPOSALS.POST_NMS_ROIS.INFERENCE,
                 mode='inference')
 
         mrcnn_masks = mrcnn_masks.permute(0, 1, 3, 4, 2)
 
         # Process detections
-        results = []
-        for i, image in enumerate(images):
-            result = utils.unmold_detections(
-                detections[i], mrcnn_masks[i], image.shape, windows[i])
-            results.append(result)
-        # TODO, fix it
-        return results[0], image_metas
+        result = utils.unmold_detections(detections[0], mrcnn_masks[0],
+                                         image_metas)
+        return result, image_metas
 
     @staticmethod
     def _set_bn_eval(model):
@@ -342,7 +338,8 @@ class MaskRCNN(nn.Module):
             train_dataset, val_dataset, augmentation)
 
         # Train
-        utils.log(f"\nStarting at epoch {self.epoch+1}. LR={learning_rate}\n")
+        logging.info(f"\nStarting at epoch {self.epoch+1}. "
+                     f"LR={learning_rate}\n")
         self.set_trainable(layers)
 
         # Optimizer object
@@ -362,7 +359,7 @@ class MaskRCNN(nn.Module):
         self.apply(self._set_bn_eval)
 
         for epoch in range(self.epoch+1, epochs+1):
-            utils.log("Epoch {}/{}.".format(epoch, epochs))
+            logging.info(f"Epoch {epoch}/{epochs}.")
 
             # Training
             train_losses = self._train_epoch(train_generator, optimizer)

@@ -42,9 +42,9 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     # Load image and mask
     image = dataset_handler.load_image(image_id)
     mask, class_ids = dataset_handler.load_mask(image_id)
-    shape = image.shape
-    image, window, scale, padding, crop = utils.mold_image(image)
-    mask = utils.resize_mask(mask, scale, padding, crop)
+    image, image_metas = utils.mold_image(image)
+    mask = utils.resize_mask(mask, image_metas.scale,
+                             image_metas.padding, image_metas.crop)
 
     # Augmentation
     # This requires the imgaug lib (https://github.com/aleju/imgaug)
@@ -91,10 +91,9 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
         mask = utils.minimize_masks(bbox, mask, Config.MINI_MASK.SHAPE)
 
     # Image meta data
-    image_meta = utils.compose_image_meta(image_id, shape,
-                                          window, active_class_ids)
+    image_metas.active_class_ids = active_class_ids
 
-    return image, image_meta, class_ids, bbox, mask
+    return image, image_metas, class_ids, bbox, mask
 
 
 def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes):
@@ -310,8 +309,8 @@ class DataGenerator(Dataset):
         gt_boxes = torch.from_numpy(gt_boxes).float()
         gt_masks = torch.from_numpy(gt_masks.astype(int).transpose(2, 0, 1)).float()
 
-        return (image, image_metas, rpn_match, rpn_bbox, gt_class_ids,
-                gt_boxes, gt_masks)
+        return (image, image_metas.to_numpy(), rpn_match, rpn_bbox,
+                gt_class_ids, gt_boxes, gt_masks)
 
     def __len__(self):
         return self.image_ids.shape[0]

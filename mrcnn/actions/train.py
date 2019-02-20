@@ -1,4 +1,5 @@
 
+import logging
 
 from imgaug import augmenters as iaa
 
@@ -22,12 +23,12 @@ def train(model, dataset_train, dataset_val):
 
     # If starting from imagenet, train heads only for a bit
     # since they have random weights
-    print("Train network heads")
+    logging.info('Train network heads')
     model.train_model(dataset_train, dataset_val,
                       Config.TRAINING.LEARNING.RATE,
                       20, 'heads', augmentation=augmentation)
 
-    print("Train all layers")
+    logging.info('Train all layers')
     model.train_model(dataset_train, dataset_val,
                       Config.TRAINING.LEARNING.RATE,
                       40, 'all', augmentation=augmentation)

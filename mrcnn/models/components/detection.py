@@ -1,41 +1,21 @@
 
-import logging
 import numpy as np
 import torch
 
 from tools.config import Config
 from mrcnn.utils import utils
-import nms_wrapper
-
-
-def to_input_domain(rois, probs, deltas, image_meta):
-    """Refine classified proposals and filter overlaps and return final
-    detections.
-
-    Args:
-        rois: [N, (y1, x1, y2, x2)] in normalized coordinates
-        probs: [N, num_classes]. Class probabilities.
-        deltas: [N, num_classes, (dy, dx, log(dh), log(dw))]. Class-specific
-                bounding box deltas.
-        window: (y1, x1, y2, x2) in image coordinates. The part of the image
-            that contains the image excluding the padding.
-
-    Returns:
-        detections: [N, (y1, x1, y2, x2, class_id, score)]
-    """
-    out = _to_input_domain(rois, probs, deltas, image_meta)
-    refined_rois, class_ids, class_scores = out
-    return torch.cat((refined_rois,
-                      class_ids.unsqueeze(1).float(),
-                      class_scores.unsqueeze(1)), dim=1)
+from mrcnn.utils.image_metas import ImageMetasBuilder
+import nms_wrapper  # pylint: disable=E0401
 
 
 def _to_input_domain(rois, probs, deltas, image_meta):
     # Currently only supports batchsize 1
     rois = rois.squeeze(0)
 
-    _, _, window, _ = utils.parse_image_meta(image_meta)
-    window = window[0]
+    image_metas = ImageMetasBuilder.from_numpy(image_meta)
+    window = image_metas.window
+    # _, _, window, _ = utils.parse_image_meta(image_meta)
+    # window = window[0]
 
     # Class IDs per ROI
     _, class_ids = torch.max(probs, dim=1)
@@ -66,7 +46,7 @@ def _to_input_domain(rois, probs, deltas, image_meta):
     # Round and cast to int since we're dealing with pixels now
     return refined_rois, class_ids, class_scores
 
-# TODO fix this
+
 def _apply_nms(class_ids, class_scores, refined_rois, keep):
     pre_nms_class_ids = class_ids[keep]
     pre_nms_scores = class_scores[keep]

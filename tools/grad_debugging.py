@@ -1,3 +1,9 @@
+"""
+This module is used for debugging backward gradients.
+
+Licensed under The MIT License
+Written by Jean Da Rolt
+"""
 
 
 def _get_printer(msg):

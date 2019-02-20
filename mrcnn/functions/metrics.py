@@ -83,8 +83,6 @@ def compute_ious(gt_masks, pred_masks, gt_boxes, pred_boxes):
                 intersection = intersection.nonzero().shape[0]
                 union = (pred_areas[pred_idx] + gt_areas[gt_idx]
                          - intersection).item()
-                # union = pred_masks[:, :, pred_idx] | gt_masks[:, :, gt_idx]
-                # union = union.nonzero().shape[0]
                 iou = intersection/union if union != 0.0 else 0.0
             ious[gt_idx, pred_idx] = iou
     return ious
@@ -92,15 +90,27 @@ def compute_ious(gt_masks, pred_masks, gt_boxes, pred_boxes):
 
 @profilable
 def compute_map(ious):
-    """Compute mean average precision."""
+    """Compute mean average precision.
+
+    Args:
+        ious (torch.FloatTensor((nb_gt_masks, nb_pred_masks))):
+            Intersection over Union.
+
+    Returns:
+        precision: torch.FloatTensor((1))
+
+    Note: when 2 or more predictions hit the same gt, only 1 hit is counted
+    """
     # compute hits
     thresholds = torch.arange(0.5, 1.0, 0.05)
     precisions = torch.empty_like(thresholds, device=Config.DEVICE)
     for thresh_idx, threshold in enumerate(thresholds):
         hits = ious > threshold
-        tp = torch.nonzero(hits.sum(dim=1)).shape[0]
-        fp = torch.nonzero(hits.sum(dim=0) == 0).shape[0]
-        fn = torch.nonzero(hits.sum(dim=1) == 0).shape[0]
+        pred_sum = hits.sum(dim=1)
+        gt_sum = hits.sum(dim=0)
+        tp = pred_sum.nonzero().shape[0]
+        fp = (gt_sum == 0).nonzero().shape[0]
+        fn = (pred_sum == 0).nonzero().shape[0]
         precisions[thresh_idx] = tp/(tp + fp + fn)
 
     # average precisions

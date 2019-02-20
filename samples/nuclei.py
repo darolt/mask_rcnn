@@ -30,7 +30,6 @@ import sys
 import torch
 
 from samples.nucleus_dataset_handler import NucleusDatasetHandler
-from mrcnn.actions.compute_metric import compute_metric
 from mrcnn.actions.train import train
 from mrcnn.actions.submit import submit
 
@@ -90,7 +89,7 @@ if __name__ == '__main__':
     model_path = parser.args.model
 
     # Load weights
-    print("Loading weights ", model_path)
+    logging.info(f"Loading weights from {model_path}")
     if args.command == "train":
         EXCLUDE = ['classifier.linear_class.weight',
                    'classifier.linear_class.bias',
@@ -114,9 +113,5 @@ if __name__ == '__main__':
         elif args.command == "submit":
             dataset = NucleusDatasetHandler(args.dataset, 'stage1_test')
             submit(model, dataset, RESULTS_DIR)
-        elif args.command == "metric":
-            dataset = NucleusDatasetHandler(args.dataset, 'stage1_test')
-            compute_metric(model, dataset)
         else:
-            print(f"'{args.command}' is not recognized. Use 'train', 'submit'"
-                  f" or 'metric'")
+            print(f"'{args.command}' is not recognized. Use 'train', 'submit'")
