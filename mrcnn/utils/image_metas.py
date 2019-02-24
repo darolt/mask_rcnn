@@ -1,12 +1,20 @@
+"""
+Image metas are used to store image information related to its
+original state and its transformations (to adapt it to the network
+input).
 
+Licensed under The MIT License
+Written by Jean Da Rolt
+"""
 import numpy as np
 
 
 class ImageMetas():
-
+    """Stores image metas."""
     def __init__(self, image_id, original_shape, window=None, scale=1,
-                 padding=((0, 0), (0, 0), (0, 0)), crop=None,
-                 active_class_ids=None):
+                 padding=((0, 0), (0, 0), (0, 0)),
+                 crop=(-1, -1, -1, -1),
+                 active_class_ids=(0, 1)):
         self.image_id = image_id
         self.original_shape = original_shape
         if window is None:
@@ -19,7 +27,7 @@ class ImageMetas():
             self.crop = (-1, -1, -1, -1)
         else:
             self.crop = crop
-        self.active_class_ids = (0, 1)
+        self.active_class_ids = active_class_ids
 
     def to_numpy(self):
         """Takes attributes of an image and puts them in one 1D array. Use
@@ -46,17 +54,15 @@ class ImageMetas():
         return meta
 
 
-class ImageMetasBuilder():
-    @staticmethod
-    def from_numpy(meta):
-        """Parses an image info Numpy array to its components.
-        See to_numpy() for more details.
-        """
-        metas = ImageMetas(meta[0],  # image_id
-                           meta[1:4],  # original_shape
-                           meta[4:8],   # window
-                           meta[8],  # scale
-                           meta[9:15].reshape((3, 2)),  # padding
-                           meta[15:19],  # crop
-                           meta[19:])  # active_class_ids
-        return metas
+def build_metas_from_numpy(meta):
+    """Parses an image info Numpy array to its components.
+    See to_numpy() for more details.
+    """
+    metas = ImageMetas(meta[0],  # image_id
+                       meta[1:4],  # original_shape
+                       meta[4:8],   # window
+                       meta[8],  # scale
+                       meta[9:15].reshape((3, 2)),  # padding
+                       meta[15:19],  # crop
+                       meta[19:])  # active_class_ids
+    return metas

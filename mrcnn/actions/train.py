@@ -20,7 +20,6 @@ def train(model, dataset_train, dataset_val):
         iaa.GaussianBlur(sigma=(0.0, 5.0))
     ])
 
-
     # If starting from imagenet, train heads only for a bit
     # since they have random weights
     logging.info('Train network heads')

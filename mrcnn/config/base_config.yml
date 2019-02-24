@@ -5,7 +5,7 @@ DEVICE: cpu
 # Name the configurations. For example, 'COCO', 'Experiment 3', ...etc.
 # Useful if your code needs to do things differently depending on which
 # experiment is running.
-NAME: None  # Override in sub-classes
+NAME: None  # Override
 
 DATASET_PATH: None  # By default it is passed through the command line
 

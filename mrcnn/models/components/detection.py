@@ -4,35 +4,29 @@ import torch
 
 from tools.config import Config
 from mrcnn.utils import utils
-from mrcnn.utils.image_metas import ImageMetasBuilder
 import nms_wrapper  # pylint: disable=E0401
 
 
-def _to_input_domain(rois, probs, deltas, image_meta):
+def _take_top_detections(rois, probs, deltas):
+    """For each ROI, takes TOP probs, ids and deltas."""
+    nb_rois = rois.shape[0]
+    # IDs, probs and deltas for top class
+    top_class_probs, top_class_ids = probs.max(dim=1)
+    top_deltas = deltas[range(nb_rois), top_class_ids]
+    return top_class_probs, top_class_ids, top_deltas
+
+
+def _to_input_domain(rois, probs, deltas):
     # Currently only supports batchsize 1
-    rois = rois.squeeze(0)
 
-    image_metas = ImageMetasBuilder.from_numpy(image_meta)
-    window = image_metas.window
-    # _, _, window, _ = utils.parse_image_meta(image_meta)
-    # window = window[0]
-
-    # Class IDs per ROI
-    _, class_ids = torch.max(probs, dim=1)
-
-    # Class probability of the top class of each ROI
-    # Class-specific bounding box deltas
-    idx = torch.arange(class_ids.size()[0]).long().to(Config.DEVICE)
-
-    class_scores = probs[idx.detach(), class_ids.detach()]
-    deltas_specific = deltas[idx.detach(), class_ids[0].detach()]
+    top_class_probs, top_class_ids, top_deltas = \
+        _take_top_detections(rois, probs, deltas)
 
     # Apply bounding box deltas
     # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
-    deltas_specific = (deltas_specific*Config.RPN.BBOX_STD_DEV_GPU)
-    refined_rois = utils.apply_box_deltas(rois.unsqueeze(0),
-                                          deltas_specific.unsqueeze(0))
-    refined_rois = refined_rois.squeeze(0)
+    top_deltas = top_deltas*Config.RPN.BBOX_STD_DEV_GPU
+    refined_rois = utils.apply_box_deltas(
+        rois, top_deltas.unsqueeze(0)).squeeze(0)
 
     # Convert coordinates to image domain
     height, width = Config.IMAGE.SHAPE[:2]
@@ -41,28 +35,28 @@ def _to_input_domain(rois, probs, deltas, image_meta):
 
     refined_rois = refined_rois * scale
     # Clip boxes to image window
-    refined_rois = utils.clip_to_window(window, refined_rois)
+    window = (0, 0, height, width)
+    refined_rois = utils.clip_boxes(refined_rois, window, squeeze=True)
 
-    # Round and cast to int since we're dealing with pixels now
-    return refined_rois, class_ids, class_scores
+    return refined_rois, top_class_ids, top_class_probs
 
 
-def _apply_nms(class_ids, class_scores, refined_rois, keep):
+def _apply_nms(class_ids, class_probs, refined_rois, keep):
     pre_nms_class_ids = class_ids[keep]
-    pre_nms_scores = class_scores[keep]
+    pre_nms_scores = class_probs[keep]
     pre_nms_rois = refined_rois[keep]
     for i, class_id in enumerate(pre_nms_class_ids.unique()):
         # Pick detections of this class
         class_idxs = (pre_nms_class_ids == class_id).nonzero().squeeze(1)
         class_rois = pre_nms_rois[class_idxs]
-        class_scores = pre_nms_scores[class_idxs]
+        class_probs = pre_nms_scores[class_idxs]
         # Sort
-        class_scores, order = class_scores.sort(descending=True)
+        class_probs, order = class_probs.sort(descending=True)
         class_rois = class_rois[order, :]
 
         class_keep = nms_wrapper.nms_indexes(
             class_rois.unsqueeze(0),
-            class_scores.unsqueeze(0),
+            class_probs.unsqueeze(0),
             Config.DETECTION.NMS_THRESHOLD,
             class_rois.shape[0]).squeeze(0)
 
@@ -75,11 +69,11 @@ def _apply_nms(class_ids, class_scores, refined_rois, keep):
             nms_keep = class_keep
         else:
             nms_keep = (torch.cat((nms_keep, class_keep))).unique()
-    keep = utils.intersect1d(keep, nms_keep)
+    keep = utils.set_intersection(keep, nms_keep)
     return keep
 
 
-def detection_layer(rois, probs, deltas, image_meta):
+def detection_layer(rois, probs, deltas):
     """Refine classified proposals and filter overlaps and return final
     detections.
 
@@ -93,28 +87,28 @@ def detection_layer(rois, probs, deltas, image_meta):
 
     Returns detections shaped: [N, (y1, x1, y2, x2, class_id, score)]
     """
-    det_out = _to_input_domain(rois, probs, deltas, image_meta)
-    refined_rois, class_ids, class_scores = det_out
+    det_out = _to_input_domain(rois, probs, deltas)
+    refined_rois, class_ids, class_probs = det_out
 
     # Filter out background boxes
     keep_fg = class_ids > 0
 
     # Filter out low confidence boxes
     if Config.DETECTION.MIN_CONFIDENCE:
-        greater_scores = class_scores >= Config.DETECTION.MIN_CONFIDENCE
+        greater_scores = class_probs >= Config.DETECTION.MIN_CONFIDENCE
         keep_fg = keep_fg & greater_scores
     keep = keep_fg.nonzero().squeeze(1)
 
     # Apply per-class NMS
-    keep = _apply_nms(class_ids, class_scores, refined_rois, keep)
+    keep = _apply_nms(class_ids, class_probs, refined_rois, keep)
 
     # Keep top detections
     roi_count = Config.DETECTION.MAX_INSTANCES
-    top_scores_idxs = class_scores[keep].sort(descending=True)[1][:roi_count]
+    top_scores_idxs = class_probs[keep].sort(descending=True)[1][:roi_count]
     keep = keep[top_scores_idxs]
 
     # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]
     # Coordinates are in image domain.
     return torch.cat((refined_rois[keep],
                       class_ids[keep].unsqueeze(1).float(),
-                      class_scores[keep].unsqueeze(1)), dim=1)
+                      class_probs[keep].unsqueeze(1)), dim=1)

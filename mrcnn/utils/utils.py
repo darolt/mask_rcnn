@@ -27,12 +27,6 @@ from mrcnn.utils.image_metas import ImageMetas
 from tools.config import Config
 
 
-COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
-
-
-class NoPositiveAreaError(Exception):
-    pass
-
 ############################################################
 #  Bounding Boxes
 ############################################################
@@ -67,29 +61,20 @@ def apply_box_deltas(boxes, deltas):
     return result
 
 
-def clip_to_window(window, boxes):
-    """
-        window: (y1, x1, y2, x2). The window in the image we want to clip to.
-        boxes: [N, (y1, x1, y2, x2)]
-    """
-    y1, x1, y2, x2 = boxes.chunk(4, dim=1)
-    y = torch.cat([y1, y2], dim=1).clamp(float(window[0]), float(window[2]))
-    x = torch.cat([x1, x2], dim=1).clamp(float(window[1]), float(window[3]))
-    boxes = torch.cat([y[:, 0].unsqueeze(1), x[:, 0].unsqueeze(1),
-                       y[:, 1].unsqueeze(1), x[:, 1].unsqueeze(1)], dim=1)
-    return boxes
-
-
-def clip_boxes(boxes, window):
+def clip_boxes(boxes, window, squeeze=False):
     """
     boxes: [N, 4] each col is y1, x1, y2, x2
     window: [4] in the form y1, x1, y2, x2
     """
+    if squeeze:
+        boxes = boxes.unsqueeze(0)
     boxes = torch.stack(
         [boxes[:, :, 0].clamp(float(window[0]), float(window[2])),
          boxes[:, :, 1].clamp(float(window[1]), float(window[3])),
          boxes[:, :, 2].clamp(float(window[0]), float(window[2])),
          boxes[:, :, 3].clamp(float(window[1]), float(window[3]))], 2)
+    if squeeze:
+        boxes = boxes.squeeze(0)
     return boxes
 
 
@@ -224,18 +209,10 @@ def mold_inputs(images):
     for image in images:
         # Resize image to fit the model expected size
         molded_image, image_metas = mold_image(image)
-        # Build image_meta
-        # image_meta = compose_image_meta(
-            # 0, image.shape, window,
-            # np.zeros([Config.NUM_CLASSES], dtype=np.int32))
-        # Append
         molded_images.append(molded_image)
-        # windows.append(window)
         images_metas.append(image_metas)
     # Pack into arrays
     molded_images = np.stack(molded_images)
-    # image_metas = np.stack(image_metas)
-    # windows = np.stack(windows)
     return molded_images, image_metas
 
 
@@ -244,27 +221,21 @@ def unmold_detections(detections, mrcnn_mask, image_metas):
     network output to a format suitable for use in the rest of the
     application.
 
-    detections: [N, (y1, x1, y2, x2, class_id, score)]
-    mrcnn_mask: [N, height, width, num_classes]
-    image_shape: [height, width, depth] Original size of the image
-                 before resizing
-    window: [y1, x1, y2, x2] Box in the image where the real image is
-            excluding the padding.
+    Args:
+        detections: [N, (y1, x1, y2, x2, class_id, score)]
+        mrcnn_mask: [N, height, width, num_classes]
+        image_metas: ImageMetas object, contains meta about image
 
     Returns:
-    boxes: [N, (y1, x1, y2, x2)] Bounding boxes in pixels
-    class_ids: [N] Integer class IDs for each bounding box
-    scores: [N] Float probability scores of the class_id
-    masks: [height, width, num_instances] Instance masks
+        DetectionOutput object. Rois, class_ids, scores and masks.
     """
     nb_dets = detections.shape[0]
-
     # Extract boxes, class_ids, scores, and class-specific masks
     boxes = detections[:nb_dets, :4]
     class_ids = detections[:nb_dets, 4].to(torch.long)
     scores = detections[:nb_dets, 5]
-    masks = mrcnn_mask[torch.arange(nb_dets, dtype=torch.long), :, :, class_ids]
-
+    masks = mrcnn_mask[torch.arange(nb_dets, dtype=torch.long),
+                       :, :, class_ids]
     final_rois, final_class_ids, final_scores, final_masks = \
         unmold_boxes(boxes, class_ids, masks, image_metas, scores)
     return DetectionOutput(final_rois, final_class_ids, final_scores,
@@ -292,20 +263,18 @@ def unmold_boxes(boxes, class_ids, masks, image_metas, scores=None):
     # Extract boxes, class_ids, scores, and class-specific masks
     class_ids = class_ids.to(torch.long)
 
-    image_shape2 = (image_metas.original_shape[0],
-                    image_metas.original_shape[1])
     boxes = to_img_domain(boxes, image_metas).to(torch.int32)
 
     boxes, class_ids, masks, scores = remove_zero_area(boxes, class_ids,
                                                        masks, scores)
 
-    full_masks = unmold_masks(masks, boxes, image_shape2)
+    full_masks = unmold_masks(masks, boxes, image_metas)
 
     return boxes, class_ids, scores, full_masks
 
 
 def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
-                 mode="square"):
+                 mode='square'):
     """Resizes an image keeping the aspect ratio unchanged.
 
     min_dim: if provided, resizes the image such that it's smaller
@@ -347,11 +316,12 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
     padding = [(0, 0), (0, 0), (0, 0)]
     crop = None
 
-    if mode == "none":
-        return image, ImageMetas(0, original_shape, window, scale, padding, crop)
+    if mode == 'none':
+        return image, ImageMetas(0, original_shape, window,
+                                 scale, padding, crop)
 
     # Scale?
-    if min_dim and mode != "pad64":
+    if min_dim and mode != 'pad64':
         # Scale up but not down
         scale = max(1, min_dim / min(h, w))
     if min_scale:
@@ -360,7 +330,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         scale = min_dim/max(h, w)
 
     # Does it exceed max dim?
-    if max_dim and mode == "square":
+    if max_dim and mode == 'square':
         image_max = max(h, w)
         if round(image_max * scale) > max_dim:
             scale = max_dim / image_max
@@ -368,14 +338,14 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
     # Resize image using bilinear interpolation
     if scale != 1:
         with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
+            warnings.simplefilter('ignore')
             image = skimage.transform.resize(
                 image, (round(h * scale), round(w * scale)),
                 order=1, mode="constant", preserve_range=True)
 
     # Need padding or cropping?
     h, w = image.shape[:2]
-    if mode == "square":
+    if mode == 'square':
         # Get new height and width
         top_pad = (max_dim - h) // 2
         bottom_pad = max_dim - h - top_pad
@@ -384,7 +354,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         padding = [(top_pad, bottom_pad), (left_pad, right_pad), (0, 0)]
         image = np.pad(image, padding, mode='constant', constant_values=0)
         window = (top_pad, left_pad, h + top_pad, w + left_pad)
-    elif mode == "pad64":
+    elif mode == 'pad64':
         # Both sides must be divisible by 64
         assert min_dim % 64 == 0, 'Minimum dimension must be a multiple of 64'
         # Height
@@ -407,7 +377,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         # TODO: zero is ok as padding value?
         image = np.pad(image, padding, mode='constant', constant_values=0)
         window = (top_pad, left_pad, h + top_pad, w + left_pad)
-    elif mode == "crop":
+    elif mode == 'crop':
         # Pick a random crop
         y = random.randint(0, (h - min_dim))
         x = random.randint(0, (w - min_dim))
@@ -506,11 +476,13 @@ def unmold_mask(mask, bbox, image_shape):
     return full_mask
 
 
-def unmold_masks(masks, boxes, image_shape):
+def unmold_masks(masks, boxes, image_metas):
     # Resize masks to original image size and set boundary threshold.
-    N = masks.shape[0]
+    image_shape = (image_metas.original_shape[0],
+                   image_metas.original_shape[1])
+    nb_masks = masks.shape[0]
     full_masks = []
-    for i in range(N):
+    for i in range(nb_masks):
         # Convert neural network mask to full size mask
         full_mask = unmold_mask(masks[i], boxes[i], image_shape)
         full_masks.append(full_mask)
@@ -529,7 +501,7 @@ def remove_zero_area(boxes, class_ids, masks, scores=None):
     skip = too_small + too_short + too_thin
     positive_area = torch.nonzero(skip == 0)
     if positive_area.nelement() == 0:
-        raise NoPositiveAreaError('No box has positive area.')
+        raise Exception('No box has positive area.')
     keep_ix = positive_area[:, 0]
     if keep_ix.shape[0] != boxes.shape[0]:
         boxes = boxes[keep_ix]
@@ -546,75 +518,21 @@ def to_img_domain(boxes, image_metas):
     window = torch.tensor(image_metas.window,
                           dtype=torch.float32,
                           device=Config.DEVICE)
-    # Compute scale and shift to translate coordinates to image domain.
-    h_scale = image_shape[0] / (window[2] - window[0])
-    w_scale = image_shape[1] / (window[3] - window[1])
-    shift = window[:2]  # y, x
-    scales = torch.tensor([h_scale, w_scale, h_scale, w_scale],
-                          device=Config.DEVICE)
-    shifts = torch.tensor([shift[0], shift[1], shift[0], shift[1]],
+    # Compute shift to translate coordinates to image domain.
+    shifts = torch.tensor([window[0], window[1], window[0], window[1]],
                           device=Config.DEVICE)
 
     # Translate bounding boxes to image domain
-    boxes = ((boxes - shifts) * scales)
+    boxes = ((boxes - shifts) / image_metas.scale)
+    original_box = (0, 0, image_shape[0], image_shape[1])
+    boxes = clip_boxes(boxes, original_box, squeeze=True)
     return boxes
 
-############################################################
-#  Utilities
-############################################################
 
-
-def printProgressBar(iteration, total, losses):
+def set_intersection(tensor1, tensor2):
+    """Intersection of elements present in tensor1 and tensor2.
+    Note: it only works if elements are unique in each tensor.
     """
-    Call in a loop to create terminal progress bar
-    @params:
-        iteration   - Required  : current iteration (Int)
-        total       - Required  : total iterations (Int)
-    """
-    losses = losses.item()
-    length = 10
-    fill = '█'
-    decimals = 1
-    suffix = ("loss: {:.4f}, rpn_class: {:.4f}, "
-              + "rpn_bbox: {:.4f}, mrcnn_class: {:.4f}, "
-              + "mrcnn_bbox: {:.4f}, mrcnn_mask: {:.4f}")
-    suffix = suffix.format(losses.total, losses.rpn_class,
-                           losses.rpn_bbox, losses.mrcnn_class,
-                           losses.mrcnn_bbox, losses.mrcnn_mask)
-
-    percent = ("{0:." + str(decimals) + "f}")
-    percent = percent.format(100 * (iteration / float(total)))
-
-    filled_length = int(length * iteration // total)
-    progression_bar = fill * filled_length + '-' * (length - filled_length)
-    prefix = "{}/{}".format(iteration, total)
-    print('\r%s |%s| %s%% %s' % (prefix, progression_bar, percent, suffix),
-          end='\n')
-    # Print New Line on Complete
-    if iteration == total:
-        print()
-
-
-def download_trained_weights(coco_model_path, verbose=1):
-    """Download COCO trained weights from Releases.
-
-    coco_model_path: local path of COCO trained weights
-    """
-    if verbose > 0:
-        logging.info(f"Downloading pretrained model to {coco_model_path} ...")
-    with urllib.request.urlopen(COCO_MODEL_URL) as resp:
-        with open(coco_model_path, 'wb') as out:
-            shutil.copyfileobj(resp, out)
-    if verbose > 0:
-        logging.info('... done downloading pretrained model!')
-
-
-############################################################
-#  Pytorch Utility Functions
-############################################################
-
-# TODO: this may not work if element repeats more than 2 times
-def intersect1d(tensor1, tensor2):
     aux = torch.cat((tensor1, tensor2), dim=0)
     aux = aux.sort()[0]
     return aux[:-1][(aux[1:] == aux[:-1]).detach()]

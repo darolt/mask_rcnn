@@ -46,21 +46,21 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 
 # Root directory of the project
 ROOT_DIR = os.getcwd()
-
-# Directory to save logs and model checkpoints, if not provided
-# through the command line argument --logs
-
-DEFAULT_DATASET_YEAR = "2014"
-
 # Path to trained weights file
 COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
-
-# Results directory
-# Save submission files here
+# Results directory: Save submission files here
 RESULTS_DIR = os.path.join(ROOT_DIR, "results/nuclei/")
+# Directory to save logs and model checkpoints, if not provided
+# through the command line argument --logs
+DEFAULT_DATASET_YEAR = "2014"
 
 DESCR = "Train Mask R-CNN on Kaggle's Data Science Bowl 2018 dataset."
-
+EXCLUDE = ['classifier.linear_class.weight',
+           'classifier.linear_class.bias',
+           'classifier.linear_bbox.weight',
+           'classifier.linear_bbox.bias',
+           'mask.conv5.weight',
+           'mask.conv5.bias']
 
 if __name__ == '__main__':
     parser = MRCNNParser(DESCR, ROOT_DIR)
@@ -78,7 +78,7 @@ if __name__ == '__main__':
 
     # Configurations
     configs = ['./samples/nuclei_config.yml']
-    if args.command == "detect":
+    if args.command == 'submit':
         configs.append('./samples/nuclei_config_inference.yml')
     mrcnn_config.init_config(configs, args)
 
@@ -91,12 +91,6 @@ if __name__ == '__main__':
     # Load weights
     logging.info(f"Loading weights from {model_path}")
     if args.command == "train":
-        EXCLUDE = ['classifier.linear_class.weight',
-                   'classifier.linear_class.bias',
-                   'classifier.linear_bbox.weight',
-                   'classifier.linear_bbox.bias',
-                   'mask.conv5.weight',
-                   'mask.conv5.bias']
         load_weights(model, model_path, exclude=EXCLUDE)
     else:
         load_weights(model, model_path)

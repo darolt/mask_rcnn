@@ -1,3 +1,12 @@
+"""
+Tensor container is represents a set of tensors.
+It is used by other structures to share common logic.
+
+Licensed under The MIT License
+Written by Jean Da Rolt
+"""
+
+
 class TensorContainer():
     def to(self, device):  # !pylint: disable=C0103
         """Apply pytorch's to() to all tensors in this container."""

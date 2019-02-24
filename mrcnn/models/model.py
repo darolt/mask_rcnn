@@ -16,24 +16,25 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data
 
-from mrcnn.utils import utils
-from mrcnn.models.components.proposal import proposal_layer
-from mrcnn.models.components.detection import detection_layer
 from mrcnn.data.data_generator import DataGenerator
 from mrcnn.functions.losses import Losses, compute_losses
-from mrcnn.utils import visualize
-from mrcnn.utils.model_utils import set_log_dir
 from mrcnn.models.components.anchors import generate_pyramid_anchors
+from mrcnn.models.components.classifier_head import Classifier
+from mrcnn.models.components.detection import detection_layer
 from mrcnn.models.components.detection_target import detection_target_layer
 from mrcnn.models.components.fpn import FPN
-from mrcnn.models.components.classifier_head import Classifier
 from mrcnn.models.components.mask_head import Mask
+from mrcnn.models.components.proposal import proposal_layer
 from mrcnn.models.components.resnet import ResNet
 from mrcnn.models.components.rpn import RPN
 from mrcnn.structs.mrcnn_ground_truth import MRCNNGroundTruth
 from mrcnn.structs.mrcnn_output import MRCNNOutput
 from mrcnn.structs.rpn_output import RPNOutput
 from mrcnn.structs.rpn_target import RPNTarget
+from mrcnn.utils import utils
+from mrcnn.utils import visualize
+from mrcnn.utils.model_utils import set_log_dir
+from mrcnn.utils.progress_bar import ProgressBar
 from tools.config import Config
 from tools.time_profiling import profilable
 
@@ -171,15 +172,13 @@ class MaskRCNN(nn.Module):
         with torch.no_grad():
             detections, mrcnn_masks = self._predict(
                 molded_image,
-                image_metas.to_numpy(),
                 Config.PROPOSALS.POST_NMS_ROIS.INFERENCE,
                 mode='inference')
 
-        mrcnn_masks = mrcnn_masks.permute(0, 1, 3, 4, 2)
-
+        mrcnn_masks = mrcnn_masks.permute(0, 2, 3, 1)
         # Process detections
-        result = utils.unmold_detections(detections[0], mrcnn_masks[0],
-                                         image_metas)
+        result = utils.unmold_detections(
+            detections, mrcnn_masks, image_metas)
         return result, image_metas
 
     @staticmethod
@@ -213,10 +212,9 @@ class MaskRCNN(nn.Module):
 
         return mrcnn_feature_maps, rpn_out
 
-    def _inference(self, mrcnn_feature_maps, rpn_rois, image_metas):
+    def _inference(self, mrcnn_feature_maps, rpn_rois):
         # Network Heads
         # Proposal classifier and BBox regressor heads
-        logging.debug(f"Infering.")
         mrcnn_feature_maps_batch = [x[0].unsqueeze(0)
                                     for x in mrcnn_feature_maps]
         _, mrcnn_class, mrcnn_deltas = \
@@ -227,7 +225,7 @@ class MaskRCNN(nn.Module):
         # in image coordinates
         with torch.no_grad():
             detections = detection_layer(rpn_rois, mrcnn_class,
-                                         mrcnn_deltas, image_metas)
+                                         mrcnn_deltas)
 
         detection_boxes = detections[:, :4]/self.scale
         detection_boxes = detection_boxes.unsqueeze(0)
@@ -235,13 +233,13 @@ class MaskRCNN(nn.Module):
         mrcnn_mask = self.mask(mrcnn_feature_maps, detection_boxes)
 
         # Add back batch dimension
-        detections = detections.unsqueeze(0)
-        mrcnn_mask = mrcnn_mask.unsqueeze(0)
+        detections = detections
+        mrcnn_mask = mrcnn_mask
 
         return detections, mrcnn_mask
 
     @profilable
-    def _predict(self, molded_images, image_metas, proposal_count,
+    def _predict(self, molded_images, proposal_count,
                  mode='training', gt=None):
 
         if mode not in ['inference', 'training']:
@@ -263,7 +261,7 @@ class MaskRCNN(nn.Module):
                 anchors=anchors)
 
         if mode == 'inference':
-            return self._inference(mrcnn_feature_maps, rpn_rois, image_metas)
+            return self._inference(mrcnn_feature_maps, rpn_rois)
         elif mode == 'training':
             # Normalize coordinates
             gt.boxes = gt.boxes / self.scale
@@ -384,6 +382,7 @@ class MaskRCNN(nn.Module):
         """Trains a single epoch."""
         losses_sum = Losses()
         steps = Config.TRAINING.STEPS_PER_EPOCH
+        progress_bar = ProgressBar(steps)
 
         for step, inputs in enumerate(datagenerator):
             if step == steps:
@@ -400,7 +399,6 @@ class MaskRCNN(nn.Module):
             rpn_out, mrcnn_targets, mrcnn_outs = \
                 self._predict(
                     images,
-                    image_metas,
                     Config.PROPOSALS.POST_NMS_ROIS.TRAINING,
                     gt=gt)
             del images, image_metas, gt
@@ -417,8 +415,7 @@ class MaskRCNN(nn.Module):
 
             optimizer.step()
 
-            # Progress
-            utils.printProgressBar(step + 1, steps, losses)
+            progress_bar.print(losses)
 
             # Statistics
             losses_sum = losses_sum + losses.item()/steps
@@ -431,27 +428,24 @@ class MaskRCNN(nn.Module):
         """Validation step. Usually called with torch.no_grad()."""
         losses_sum = Losses()
         steps = Config.TRAINING.VALIDATION_STEPS
+        progress_bar = ProgressBar(steps)
 
         for step, inputs in enumerate(datagenerator):
-            # Break after 'steps' steps
             if step == steps:
                 break
 
             # To GPU
-            images, image_metas, rpn_target, gt = self._prepare_inputs(inputs)
+            images, _, rpn_target, gt = self._prepare_inputs(inputs)
 
             # Run object detection
             outputs = self._predict(
                 images,
-                image_metas,
                 Config.PROPOSALS.POST_NMS_ROIS.TRAINING,
                 gt=gt)
 
-            # Compute losses
             losses = compute_losses(rpn_target, *outputs)
 
-            # Progress
-            utils.printProgressBar(step + 1, steps, losses)
+            progress_bar.print(losses)
 
             # Statistics
             losses_sum = losses_sum + losses.item()/steps

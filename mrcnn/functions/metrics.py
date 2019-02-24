@@ -73,6 +73,7 @@ def compute_ious(gt_masks, pred_masks, gt_boxes, pred_boxes):
     for gt_idx in range(0, gt_masks.shape[2]):
         gt_mask = gt_masks[:, :, gt_idx]
         for pred_idx in range(0, pred_masks.shape[2]):
+            # skip masks whose boxes do not intercept
             if (gt_boxes[gt_idx, 0] > pred_boxes[pred_idx, 2] or
                     pred_boxes[pred_idx, 0] > gt_boxes[gt_idx, 2] or
                     gt_boxes[gt_idx, 1] > pred_boxes[pred_idx, 3] or
