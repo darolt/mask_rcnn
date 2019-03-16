@@ -17,8 +17,9 @@ class MRCNNParser(argparse.ArgumentParser):
         default_logs_dir = os.path.join(root_dir, "logs")
         self.add_argument("command",
                           metavar="<command>",
-                          help="'train' or 'detect'")
-        self.add_argument('--dataset', required=True,
+                          choices=['train', 'submit'],
+                          help="'train' or 'submit'")
+        self.add_argument('--dataset', required=False,
                           metavar="/path/to/coco/",
                           help='Directory of the dataset')
         self.add_argument('--model', required=False,
@@ -37,7 +38,7 @@ class MRCNNParser(argparse.ArgumentParser):
                           help='name of the function to be debbuged.')
         self.args = self.parse_args()  # pylint: disable=C0103
 
-        self.print()
+        self.display()
 
         if self.args.model:
             if self.args.model.lower() == "coco":
@@ -54,7 +55,7 @@ class MRCNNParser(argparse.ArgumentParser):
         else:
             self.args.model = ""
 
-    def print(self):
+    def display(self):
         print(f"Command: {self.args.command}")
         print(f"Model: {self.args.model}")
         print(f"Dataset: {self.args.dataset}")

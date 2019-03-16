@@ -1,10 +1,11 @@
+
 import imgaug
+import numpy as np
 import torch
 from torch.utils.data import Dataset
-import numpy as np
 
+from mrcnn.models.components.anchors import generate_pyramid_anchors
 from mrcnn.utils import utils
-from mrcnn.models.components import anchors
 from tools.config import Config
 from tools.time_profiling import profilable
 
@@ -249,12 +250,12 @@ class DataGenerator(Dataset):
 
         # Anchors
         # [anchor_count, (y1, x1, y2, x2)]
-        self.anchors = anchors.generate_pyramid_anchors(Config.RPN.ANCHOR.SCALES,
-                                                        Config.RPN.ANCHOR.RATIOS,
-                                                        Config.BACKBONE.SHAPES,
-                                                        Config.BACKBONE.STRIDES,
-                                                        Config.RPN.ANCHOR.STRIDE)
-        self.anchors = torch.from_numpy(self.anchors)
+        self.anchors = generate_pyramid_anchors(
+            Config.RPN.ANCHOR.SCALES,
+            Config.RPN.ANCHOR.RATIOS,
+            Config.BACKBONE.SHAPES,
+            Config.BACKBONE.STRIDES,
+            Config.RPN.ANCHOR.STRIDE)
 
     @profilable
     def __getitem__(self, image_index):
@@ -273,26 +274,26 @@ class DataGenerator(Dataset):
                                                 gt_class_ids, gt_boxes)
 
         # If more instances than fits in the array, sub-sample from them.
-        if gt_boxes.shape[0] > Config.DETECTION.MAX_GT_INSTANCES:
+        if gt_boxes.shape[0] > Config.PROPOSALS.MAX_GT_INSTANCES:
             ids = np.random.choice(np.arange(gt_boxes.shape[0]),
-                                   Config.DETECTION.MAX_GT_INSTANCES,
+                                   Config.PROPOSALS.MAX_GT_INSTANCES,
                                    replace=False)
             gt_class_ids = gt_class_ids[ids]
             gt_boxes = gt_boxes[ids]
             gt_masks = gt_masks[:, :, ids]
-        elif gt_boxes.shape[0] < Config.DETECTION.MAX_GT_INSTANCES:
-            gt_class_ids_ = np.zeros((Config.DETECTION.MAX_GT_INSTANCES),
+        elif gt_boxes.shape[0] < Config.PROPOSALS.MAX_GT_INSTANCES:
+            gt_class_ids_ = np.zeros((Config.PROPOSALS.MAX_GT_INSTANCES),
                                      dtype=np.int32)
             gt_class_ids_[:gt_class_ids.shape[0]] = gt_class_ids
             gt_class_ids = gt_class_ids_
 
-            gt_boxes_ = np.zeros((Config.DETECTION.MAX_GT_INSTANCES, 4),
+            gt_boxes_ = np.zeros((Config.PROPOSALS.MAX_GT_INSTANCES, 4),
                                  dtype=np.int32)
             gt_boxes_[:gt_boxes.shape[0]] = gt_boxes
             gt_boxes = gt_boxes_
 
             gt_masks_ = np.zeros((gt_masks.shape[0], gt_masks.shape[1],
-                                  Config.DETECTION.MAX_GT_INSTANCES),
+                                  Config.PROPOSALS.MAX_GT_INSTANCES),
                                  dtype=np.int32)
             gt_masks_[:, :, :gt_masks.shape[-1]] = gt_masks
             gt_masks = gt_masks_

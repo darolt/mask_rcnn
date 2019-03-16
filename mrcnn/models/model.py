@@ -61,14 +61,6 @@ class MaskRCNN(nn.Module):
         super(MaskRCNN, self).__init__()
         self.model_dir = model_dir
         set_log_dir(self)
-        self.build()
-        self.initialize_weights()
-        self.loss_history = []
-        self.val_loss_history = []
-
-        h, w = Config.IMAGE.SHAPE[:2]
-        scale = torch.from_numpy(np.array([h, w, h, w])).float()
-        self.scale = scale.to(Config.DEVICE)
 
     def build(self):
         """Build Mask R-CNN architecture.
@@ -81,21 +73,18 @@ class MaskRCNN(nn.Module):
         C1, C2, C3, C4, C5 = resnet.stages()
 
         # Top-down Layers
-        # TODO: add assert to verify feature map sizes match what's in Config
-        self.fpn = FPN(C1, C2, C3, C4, C5, out_channels=256).float()
-        self.fpn.to(Config.DEVICE)
+        self.fpn = (FPN(C1, C2, C3, C4, C5, out_channels=256)
+                    .float().to(Config.DEVICE))
 
         # Generate Anchors
-        anchors = generate_pyramid_anchors(
+        self.anchors = generate_pyramid_anchors(
             Config.RPN.ANCHOR.SCALES,
             Config.RPN.ANCHOR.RATIOS,
             Config.BACKBONE.SHAPES,
             Config.BACKBONE.STRIDES,
-            Config.RPN.ANCHOR.STRIDE)
-        new_anchors_shape = (Config.TRAINING.BATCH_SIZE,) + anchors.shape
-        anchors = np.broadcast_to(anchors, new_anchors_shape)
-        self.anchors = torch.from_numpy(anchors).float()
-        self.anchors = self.anchors.to(Config.DEVICE)
+            Config.RPN.ANCHOR.STRIDE,
+            Config.TRAINING.BATCH_SIZE
+        ).to(Config.DEVICE)
 
         # RPN
         self.rpn = RPN(len(Config.RPN.ANCHOR.RATIOS),
@@ -118,6 +107,8 @@ class MaskRCNN(nn.Module):
                     parameter.requires_grad = False
 
         self.apply(set_bn_fix)
+        self.initialize_weights()
+        self.to(Config.DEVICE)
 
     def initialize_weights(self):
         """Initialize model weights."""
@@ -227,7 +218,7 @@ class MaskRCNN(nn.Module):
             detections = detection_layer(rpn_rois, mrcnn_class,
                                          mrcnn_deltas)
 
-        detection_boxes = detections[:, :4]/self.scale
+        detection_boxes = detections[:, :4]/Config.RPN.NORM
         detection_boxes = detection_boxes.unsqueeze(0)
         # Create masks for detections
         mrcnn_mask = self.mask(mrcnn_feature_maps, detection_boxes)
@@ -264,12 +255,8 @@ class MaskRCNN(nn.Module):
             return self._inference(mrcnn_feature_maps, rpn_rois)
         elif mode == 'training':
             # Normalize coordinates
-            gt.boxes = gt.boxes / self.scale
+            gt.boxes = gt.boxes / Config.RPN.NORM
 
-            # Generate detection targets
-            # Subsamples proposals and generates target outputs for training
-            # Note that proposal class IDs, gt_boxes, and gt_masks are zero
-            # padded. Equally, returned rois and targets are zero padded.
             mrcnn_targets, mrcnn_outs = [], []
             for img_idx in range(0, batch_size):
                 with torch.no_grad():
@@ -310,8 +297,8 @@ class MaskRCNN(nn.Module):
             val_set, batch_size=1, shuffle=True, num_workers=4)
         return train_generator, val_generator
 
-    def train_model(self, train_dataset, val_dataset, learning_rate, epochs,
-                    layers, augmentation=None):
+    def fit(self, train_dataset, val_dataset, learning_rate, epochs,
+            layers, augmentation=None):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
         learning_rate: The learning rate to train with
@@ -336,8 +323,8 @@ class MaskRCNN(nn.Module):
             train_dataset, val_dataset, augmentation)
 
         # Train
-        logging.info(f"\nStarting at epoch {self.epoch+1}. "
-                     f"LR={learning_rate}\n")
+        logging.info(f"Starting at epoch {self.epoch+1}. "
+                     f"LR={learning_rate}")
         self.set_trainable(layers)
 
         # Optimizer object
@@ -356,6 +343,7 @@ class MaskRCNN(nn.Module):
         self.train()
         self.apply(self._set_bn_eval)
 
+        loss_history, val_loss_history = [], []
         for epoch in range(self.epoch+1, epochs+1):
             logging.info(f"Epoch {epoch}/{epochs}.")
 
@@ -367,10 +355,10 @@ class MaskRCNN(nn.Module):
                 val_losses = self._validation_epoch(val_generator)
 
             # Statistics
-            self.loss_history.append(train_losses)
-            self.val_loss_history.append(val_losses)
-            visualize.plot_losses(self.loss_history,
-                                  self.val_loss_history,
+            loss_history.append(train_losses)
+            val_loss_history.append(val_losses)
+            visualize.plot_losses(loss_history,
+                                  val_loss_history,
                                   log_dir=self.log_dir)
 
             # Save model

@@ -1,30 +1,30 @@
 ---
 # Configuration for training on the nucleus segmentation dataset.
+
+DEVICE: cuda:1
+
 NAME: nuclei
+
+DATASET_PATH: /home/jro/wk/kaggle/input/
 
 IMAGES_PER_GPU : 6
 
-NUM_CLASSES : 2 # Background + nucleus
-
 RPN:
-    ANCHOR_SCALES: [8, 16, 32, 64, 128]
     NMS_THRESHOLD: 0.9
+    ANCHOR:
+#        SCALES: [10, 20, 40, 60, 80]
+        SCALES: [32, 64, 128, 256, 512]
+        RATIOS: [0.5, 1, 2]
 
 IMAGE:
     MAX_DIM: 512
-    MEAN_PIXEL: [43.53, 39.56, 48.22]
     MIN_DIM: 512
     RESIZE_MODE: crop
 
 PROPOSALS:
     POST_NMS_ROIS:
         INFERENCE: 2000
-        TRAINING: 1000
-    TRAIN_ANCHORS_PER_IMAGE: 64
+        TRAINING: 2000
     TRAIN_ROIS_PER_IMAGE : 128
-
-DETECTION:
     MAX_GT_INSTANCES: 200
-    MIN_CONFIDENCE: 0
-    MAX_INSTANCES: 400
 ...

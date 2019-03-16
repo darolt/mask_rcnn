@@ -17,8 +17,18 @@ def init_config(config_fns, cmd_args):
     for filename in config_fns:
         Config.merge(filename)
 
-    if Config.GPU_COUNT and str(cmd_args.dev) in '0123456789':
-        Config.DEVICE = torch.device('cuda:' + str(cmd_args.dev))
+    if Config.GPU_COUNT and torch.cuda.device_count() > 0:
+        Config.DEVICE_NB = int(Config.DEVICE.split(':')[1])
+        Config.DEVICE = torch.device(Config.DEVICE)
+        if str(cmd_args.dev) in '123456789':
+            Config.DEVICE = torch.device('cuda:' + str(cmd_args.dev))
+            Config.DEVICE_NB = cmd_args.dev
+    else:
+        Config.DEVICE_NB = 0
+        Config.DEVICE = torch.device('cpu')
+
+    if cmd_args.dataset:
+        Config.DATASET_PATH = cmd_args.dataset
 
     if Config.GPU_COUNT > 0:
         Config.TRAINING.BATCH_SIZE = \
@@ -27,6 +37,7 @@ def init_config(config_fns, cmd_args):
         Config.TRAINING.BATCH_SIZE = Config.IMAGES_PER_GPU
 
     # Adjust step size based on batch size
+    # TODO this should not be hardcoded
     # Config.STEPS_PER_EPOCH = Config.BATCH_SIZE * Config.STEPS_PER_EPOCH
     Config.TRAINING.STEPS_PER_EPOCH = \
         ((657 - 25) // Config.IMAGES_PER_GPU)
@@ -46,7 +57,8 @@ def init_config(config_fns, cmd_args):
         np.reshape(Config.RPN.BBOX_STD_DEV, [1, 4])
         ).float().to(Config.DEVICE)
 
-    Config.BBOX_STD_DEV = np.array(Config.BBOX_STD_DEV)
+    Config.BBOX_STD_DEV = torch.from_numpy(
+        np.array(Config.BBOX_STD_DEV)).float().to(Config.DEVICE)
 
     # this configurations are for speeding up the training
     height, width = Config.IMAGE.SHAPE[:2]

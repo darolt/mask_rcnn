@@ -9,7 +9,7 @@ import sys
 
 import torch
 
-import nms_wrapper
+from mrcnn.models.components.nms import nms_wrapper  # pylint: disable=E0611
 
 
 logging.basicConfig(stream=sys.stderr, level=logging.INFO)
@@ -37,9 +37,9 @@ def nms_test():
     if torch.equal(nms_out, gt_nms_out):
         logging.info('NMS passed.')
         return 0
-    else:
-        logging.info('NMS failed!')
-        return 1
+
+    logging.info('NMS failed!')
+    return 1
 
 
 if __name__ == '__main__':

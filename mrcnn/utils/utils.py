@@ -163,8 +163,7 @@ def box_refinement(box, gt_box):
     dh = torch.log(gt_height / height)
     dw = torch.log(gt_width / width)
 
-    result = torch.stack([dy, dx, dh, dw], dim=1)
-    return result
+    return torch.stack([dy, dx, dh, dw], dim=1) / Config.BBOX_STD_DEV
 
 
 def subtract_mean(images):
@@ -527,6 +526,22 @@ def to_img_domain(boxes, image_metas):
     original_box = (0, 0, image_shape[0], image_shape[1])
     boxes = clip_boxes(boxes, original_box, squeeze=True)
     return boxes
+
+
+def to_mini_mask(rois, boxes):
+    """
+    Transform ROI coordinates from normalized image space
+    to normalized mini-mask space.
+    """
+    y1, x1, y2, x2 = rois.chunk(4, dim=1)
+    gt_y1, gt_x1, gt_y2, gt_x2 = boxes.chunk(4, dim=1)
+    gt_h = gt_y2 - gt_y1
+    gt_w = gt_x2 - gt_x1
+    y1 = (y1 - gt_y1) / gt_h
+    x1 = (x1 - gt_x1) / gt_w
+    y2 = (y2 - gt_y1) / gt_h
+    x2 = (x2 - gt_x1) / gt_w
+    return torch.cat([y1, x1, y2, x2], dim=1)
 
 
 def set_intersection(tensor1, tensor2):

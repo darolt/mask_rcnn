@@ -82,9 +82,9 @@ def apply_mask(image, mask, color, alpha=0.5):
 
 
 def display_instances(image, boxes, masks, class_ids, class_names,
-                      scores=None, title="",
+                      scores=None, title='',
                       figsize=(16, 16), ax=None,
-                      show_mask=True, show_bbox=True,
+                      show_mask_pixels=True, show_bbox=True,
                       colors=None, captions=None):
     """
     boxes: [num_instance, (y1, x1, y2, x2, class_id)] in image coordinates.
@@ -93,7 +93,7 @@ def display_instances(image, boxes, masks, class_ids, class_names,
     class_names: list of class names of the dataset
     scores: (optional) confidence scores for each box
     title: (optional) Figure title
-    show_mask, show_bbox: To show masks and bounding boxes or not
+    show_mask_pixels, show_bbox: To show masks and bounding boxes or not
     figsize: (optional) the size of the image
     colors: (optional) An array or colors to use with each object
     captions: (optional) A list of strings to use as captions for each object
@@ -147,7 +147,7 @@ def display_instances(image, boxes, masks, class_ids, class_names,
 
         # Mask
         mask = masks[:, :, i]
-        if show_mask:
+        if show_mask_pixels:
             masked_image = apply_mask(masked_image, mask, color)
 
         # Mask Polygon

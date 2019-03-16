@@ -2,7 +2,8 @@
 import torch
 from torch import isnan
 
-from mrcnn.models.components.roialign.crop_and_resize import CropAndResizeFunction
+from mrcnn.models.components.roialign.crop_and_resize_function \
+    import CropAndResizeFunction
 from tools.config import Config
 from tools.time_profiling import profilable
 

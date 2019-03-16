@@ -19,7 +19,7 @@ from mrcnn.utils.rle import mask_to_rle
 from tools.config import Config
 
 
-def submit(model, dataset, results_dir):
+def submit(model, dataset, results_dir, analyzer=None):
     """Run detection on images in the given directory."""
 
     matplotlib.use('Agg')
@@ -43,6 +43,7 @@ def submit(model, dataset, results_dir):
         image_name = dataset.image_info[image_id]['id']
         # Detect objects
         result, _ = model.detect(image)
+        result = analyzer.filter(result)
 
         # Compute metric
         gt_masks, _ = dataset.load_mask(image_id)
@@ -59,15 +60,14 @@ def submit(model, dataset, results_dir):
 
         result.cpu().numpy()
         # Encode image to RLE. Returns a string of multiple lines
-        source_id = dataset.image_info[image_id]['id']
-        rle = mask_to_rle(source_id, result.masks, result.scores)
+        rle = mask_to_rle(image_name, result.masks, result.scores)
         submission.append(rle)
         # Save image with masks
         fig = visualize.display_instances(
             image, result.rois, result.masks, result.class_ids,
             dataset.class_names, result.scores,
-            show_bbox=False, show_mask=False,
-            title="Predictions")
+            show_bbox=True, show_mask_pixels=False,
+            title=f"Predictions for {image_name}")
         fig.savefig(f"{submit_dir}/{image_name}.png")
         matplotlib.pyplot.close()
 

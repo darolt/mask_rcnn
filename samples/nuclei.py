@@ -26,19 +26,17 @@ import logging
 import os
 import sys
 
-
+import numpy as np
 import torch
 
-from samples.nucleus_dataset_handler import NucleusDatasetHandler
 from mrcnn.actions.train import train
 from mrcnn.actions.submit import submit
-
+from mrcnn.actions.analyze import analyze
 from mrcnn.config import mrcnn_config
-
 from mrcnn.utils.mrcnn_parser import MRCNNParser
 from mrcnn.utils.model_utils import load_weights
 from mrcnn.models import model as modellib
-
+from samples.nucleus_dataset_handler import NucleusDatasetHandler
 from tools.config import Config
 
 
@@ -47,12 +45,12 @@ logging.basicConfig(stream=sys.stderr, level=logging.INFO)
 # Root directory of the project
 ROOT_DIR = os.getcwd()
 # Path to trained weights file
-COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
+COCO_WEIGHTS_PATH = os.path.join(ROOT_DIR, 'mask_rcnn_coco.h5')
 # Results directory: Save submission files here
-RESULTS_DIR = os.path.join(ROOT_DIR, "results/nuclei/")
+RESULTS_DIR = os.path.join(ROOT_DIR, 'results/nuclei/')
 # Directory to save logs and model checkpoints, if not provided
 # through the command line argument --logs
-DEFAULT_DATASET_YEAR = "2014"
+DEFAULT_DATASET_YEAR = '2014'
 
 DESCR = "Train Mask R-CNN on Kaggle's Data Science Bowl 2018 dataset."
 EXCLUDE = ['classifier.linear_class.weight',
@@ -63,8 +61,7 @@ EXCLUDE = ['classifier.linear_class.weight',
            'mask.conv5.bias']
 
 if __name__ == '__main__':
-    parser = MRCNNParser(DESCR, ROOT_DIR)
-    args = parser.args
+    args = MRCNNParser(DESCR, ROOT_DIR).args
 
     if args.debug and torch.cuda.device_count() > 0:
         from tools.gpu_mem_profiling import init_profiler
@@ -82,30 +79,29 @@ if __name__ == '__main__':
         configs.append('./samples/nuclei_config_inference.yml')
     mrcnn_config.init_config(configs, args)
 
-    # Create model
-    model = modellib.MaskRCNN(model_dir=args.logs)
+    with torch.cuda.device(Config.DEVICE_NB):
+        # Create model
+        model = modellib.MaskRCNN(model_dir=args.logs)
 
-    # Select weights file to load
-    model_path = parser.args.model
-
-    # Load weights
-    logging.info(f"Loading weights from {model_path}")
-    if args.command == "train":
-        load_weights(model, model_path, exclude=EXCLUDE)
-    else:
-        load_weights(model, model_path)
-
-    if torch.cuda.device_count() > 0:
-        with torch.cuda.device(args.dev):
-            model.to(Config.DEVICE)
-
-    with torch.cuda.device(args.dev):
-        if args.command == "train":
-            dataset_train = NucleusDatasetHandler(args.dataset, 'train')
-            dataset_val = NucleusDatasetHandler(args.dataset, "val")
+        if args.command == 'train':
+            dataset_train = NucleusDatasetHandler(Config.DATASET_PATH,
+                                                  'train')
+            dataset_val = NucleusDatasetHandler(Config.DATASET_PATH,
+                                                'val')
+            # analyzer = analyze(dataset_train)
+            Config.unfreeze()
+            Config.NUM_CLASSES = 2
+            Config.IMAGE.MEAN_PIXEL = np.array([55.0, 55.0, 55.0])
+            Config.freeze()
+            load_weights(model, args.model, exclude=EXCLUDE)
+            model.build()
             train(model, dataset_train, dataset_val)
-        elif args.command == "submit":
-            dataset = NucleusDatasetHandler(args.dataset, 'stage1_test')
-            submit(model, dataset, RESULTS_DIR)
-        else:
-            print(f"'{args.command}' is not recognized. Use 'train', 'submit'")
+        elif args.command == 'submit':
+            dataset = NucleusDatasetHandler(Config.DATASET_PATH, 'stage1_test')
+            analyzer = analyze(dataset)
+            Config.unfreeze()
+            Config.IMAGE.MEAN_PIXEL = analyzer.mean_pixel
+            Config.freeze()
+            load_weights(model, args.model)
+            model.build()
+            submit(model, dataset, RESULTS_DIR, analyzer=analyzer)

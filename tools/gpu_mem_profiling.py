@@ -24,7 +24,7 @@ if 'GPU_DEBUG' in os.environ:
 
 
 def init_profiler(device, debug_function):
-    os.environ['GPU_DEBUG'] = str(device, debug_function)
+    os.environ['GPU_DEBUG'] = str(device)
     os.environ['TRACE_INTO'] = debug_function
     sys.settrace(trace_calls)
 

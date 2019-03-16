@@ -1,8 +1,10 @@
 
+import torch
+
+from mrcnn.models.components.nms import nms_wrapper  # pylint: disable=E0611
 from mrcnn.utils import utils
 from tools.config import Config
 from tools.time_profiling import profilable
-import nms_wrapper  # pylint: disable=E0401
 
 
 @profilable

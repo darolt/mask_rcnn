@@ -1,9 +1,12 @@
+
+from abc import ABCMeta, abstractmethod
+
 import numpy as np
 import skimage.color
 import skimage.io
 
 
-class DatasetHandler(object):
+class DatasetHandler(metaclass=ABCMeta):
     """The base class for dataset classes.
     To use it, create a new class that adds functions specific to the dataset
     you want to use. For example:
@@ -30,24 +33,24 @@ class DatasetHandler(object):
         return len(self._image_ids)
 
     def add_class(self, source, class_id, class_name):
-        assert "." not in source, "Source name cannot contain a dot"
+        assert '.' not in source, 'Source name cannot contain a dot'
         # Does the class exist already?
         for info in self.class_info:
-            if info['source'] == source and info["id"] == class_id:
+            if info['source'] == source and info['id'] == class_id:
                 # source.class_id combination already available, skip
                 return
         # Add the class
         self.class_info.append({
-            "source": source,
-            "id": class_id,
-            "name": class_name,
+            'source': source,
+            'id': class_id,
+            'name': class_name,
         })
 
     def add_image(self, source, image_id, path, **kwargs):
         image_info = {
-            "id": image_id,
-            "source": source,
-            "path": path,
+            'id': image_id,
+            'source': source,
+            'path': path,
         }
         image_info.update(kwargs)
         self.image_info.append(image_info)
@@ -122,6 +125,18 @@ class DatasetHandler(object):
     def image_ids(self):
         return self._image_ids
 
+    @property
+    def masks(self):
+        for img_id in self._image_ids:
+            img_masks = self.load_mask(img_id).permute(1, 2, 0)
+            for mask in img_masks:
+                yield mask
+
+    @property
+    def images(self):
+        for img_id in self._image_ids:
+            yield self.load_image(img_id)
+
     def source_image_link(self, image_id):
         """Returns the path or URL to the image.
         Override this to return a URL to the image if it's availble online for easy
@@ -142,6 +157,7 @@ class DatasetHandler(object):
             image = skimage.color.gray2rgb(image)
         return image
 
+    @abstractmethod
     def load_mask(self, image_id):
         """Load instance masks for the given image.
 
@@ -156,6 +172,4 @@ class DatasetHandler(object):
         """
         # Override this function to load a mask from your dataset.
         # Otherwise, it returns an empty mask.
-        mask = np.empty([0, 0, 0])
-        class_ids = np.empty([0], np.int32)
-        return mask, class_ids
+        pass

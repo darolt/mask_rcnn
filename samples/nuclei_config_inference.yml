@@ -1,4 +1,5 @@
 ---
+# Configuration for detection on the nucleus segmentation dataset.
 GPU_COUNT: 1
 IMAGES_PER_GPU: 1
 
@@ -8,4 +9,5 @@ IMAGE:
 
 DETECTION:
     MIN_CONFIDENCE: 0
+    MAX_INSTANCES: 400
 ...

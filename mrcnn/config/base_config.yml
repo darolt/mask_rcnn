@@ -1,13 +1,11 @@
 ---
 # set default device. cpu or cuda:<number>
 DEVICE: cpu
+DEVICE_NB: ~  # generated at runtime
 
-# Name the configurations. For example, 'COCO', 'Experiment 3', ...etc.
-# Useful if your code needs to do things differently depending on which
-# experiment is running.
-NAME: None  # Override
+NAME: ~  # Override
 
-DATASET_PATH: None  # By default it is passed through the command line
+DATASET_PATH: ~  # Override
 
 # Path to pretrained imagenet model
 IMAGENET_FILE_NAME: resnet50_imagenet.pth
@@ -49,13 +47,14 @@ TRAINING:
 
 BACKBONE:
     NAME: resnet50
-    SHAPES: [0] # set at runtime
+    # feature shapes
+    SHAPES: ~  # [[0, 0], [0, 0], [0, 0], [0, 0], [0, 0]], set at runtime
     # The strides of each layer of the FPN Pyramid. These values
     # are based on a Resnet101 backbone.
     STRIDES: [4, 8, 16, 32, 64]
 
 # Number of classification classes (including background)
-NUM_CLASSES: 2  # Override in sub-classes
+NUM_CLASSES: ~  # Override in sub-classes
 
 RPN:
     ANCHOR:
@@ -103,8 +102,8 @@ IMAGE:
     MAX_DIM: 1024
     MIN_SCALE: 0
     # Image mean (RGB)
-    MEAN_PIXEL: [123.7, 116.8, 103.9]
-    SHAPE: [1024, 1024] # set at runtime
+    MEAN_PIXEL: ~  # [125, 125, 125], set at runtime
+    SHAPE: ~  # [0, 0], set at runtime
 
 PROPOSALS:
     # Number of ROIs per image to feed to classifier/mask heads
@@ -121,6 +120,8 @@ PROPOSALS:
         INFERENCE: 1000
     # Percent of positive ROIs used to train classifier/mask heads
     ROI_POSITIVE_RATIO: 0.33
+    # Maximum number of ground truth instances to use in one image
+    MAX_GT_INSTANCES: 100
 
 # Pooled ROIs
 HEADS:
@@ -139,6 +140,4 @@ DETECTION:
     MIN_CONFIDENCE: 0.7
     # Non-maximum suppression threshold for detection
     NMS_THRESHOLD: 0.3
-    # Maximum number of ground truth instances to use in one image
-    MAX_GT_INSTANCES: 100
 ...

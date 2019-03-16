@@ -1,9 +1,15 @@
-
+"""
+Generate detection targets
+Subsamples proposals and generates target outputs for training
+Note that proposal class IDs, gt_boxes, and gt_masks are zero
+padded. Equally, returned rois and targets are zero padded.
+"""
 import logging
 
 import torch
 
-from mrcnn.models.components.roialign.crop_and_resize import CropAndResizeFunction
+from mrcnn.models.components.roialign.crop_and_resize_function \
+    import CropAndResizeFunction
 from mrcnn.structs.mrcnn_target import MRCNNTarget
 from mrcnn.utils import utils
 from tools.config import Config
@@ -70,9 +76,6 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
         # Compute bbox refinement for positive ROIs
         deltas = utils.box_refinement(positive_rois,
                                       roi_gt_boxes)
-        std_dev = torch.from_numpy(Config.BBOX_STD_DEV).float()
-        std_dev = std_dev.to(Config.DEVICE)
-        deltas /= std_dev
 
         # Assign positive ROIs to GT masks
         roi_masks = gt_masks[roi_gt_box_assignment, :, :]
@@ -80,17 +83,8 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
         # Compute mask targets
         boxes = positive_rois
         if Config.MINI_MASK.USE:
-            # Transform ROI corrdinates from normalized image space
-            # to normalized mini-mask space.
-            y1, x1, y2, x2 = positive_rois.chunk(4, dim=1)
-            gt_y1, gt_x1, gt_y2, gt_x2 = roi_gt_boxes.chunk(4, dim=1)
-            gt_h = gt_y2 - gt_y1
-            gt_w = gt_x2 - gt_x1
-            y1 = (y1 - gt_y1) / gt_h
-            x1 = (x1 - gt_x1) / gt_w
-            y2 = (y2 - gt_y1) / gt_h
-            x2 = (x2 - gt_x1) / gt_w
-            boxes = torch.cat([y1, x1, y2, x2], dim=1)
+            boxes = utils.to_mini_mask(positive_rois, roi_gt_boxes)
+
         box_ids = (torch.arange(roi_masks.shape[0]).int()
                    .to(Config.DEVICE))
         masks = CropAndResizeFunction(
@@ -127,39 +121,25 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
     # are not used for negative ROIs with zeros.
     if positive_count > 0 and negative_count > 0:
         rois = torch.cat((positive_rois, negative_rois), dim=0)
-        zeros = torch.zeros(negative_count, dtype=torch.int,
-                            device=Config.DEVICE)
-        roi_gt_class_ids = torch.cat([roi_gt_class_ids, zeros], dim=0)
-        zeros = torch.zeros(negative_count, 4, dtype=torch.float32,
-                            device=Config.DEVICE)
-        deltas = torch.cat([deltas, zeros], dim=0)
-        zeros = torch.zeros(negative_count, Config.HEADS.MASK.SHAPE[0],
-                            Config.HEADS.MASK.SHAPE[1],
-                            dtype=torch.float32,
-                            device=Config.DEVICE)
-        masks = torch.cat([masks, zeros], dim=0)
+        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE,
+                                    roi_gt_class_ids, deltas, masks)
+                        .to(Config.DEVICE)
+                        .fill_zeros(negative_count))
     elif positive_count > 0:
         rois = positive_rois
+        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE,
+                                    roi_gt_class_ids, deltas, masks)
+                        .to(Config.DEVICE))
     elif negative_count > 0:
         rois = negative_rois
-        roi_gt_class_ids = torch.zeros(negative_count,
-                                       device=Config.DEVICE)
-        deltas = torch.zeros(negative_count, 4, dtype=torch.int,
-                             device=Config.DEVICE)
-        masks = torch.zeros(negative_count, Config.HEADS.MASK.SHAPE[0],
-                            Config.HEADS.MASK.SHAPE[1],
-                            device=Config.DEVICE)
+        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE)
+                        .to(Config.DEVICE)
+                        .zeros(negative_count))
     else:
-        rois = torch.tensor([], dtype=torch.float32,
-                            device=Config.DEVICE)
-        roi_gt_class_ids = torch.tensor([], dtype=torch.int,
-                                        device=Config.DEVICE)
-        deltas = torch.tensor([], dtype=torch.float32,
-                              device=Config.DEVICE)
-        masks = torch.tensor([], dtype=torch.float32,
-                             device=Config.DEVICE)
+        rois = torch.FloatTensor().to(Config.DEVICE)
+        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE)
+                        .to(Config.DEVICE))
 
-    mrcnn_target = MRCNNTarget(roi_gt_class_ids, deltas, masks)
     return rois, mrcnn_target
 
 

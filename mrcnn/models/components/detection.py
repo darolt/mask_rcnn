@@ -3,8 +3,8 @@ import numpy as np
 import torch
 
 from tools.config import Config
+from mrcnn.models.components.nms import nms_wrapper  # pylint: disable=E0401,E0611
 from mrcnn.utils import utils
-import nms_wrapper  # pylint: disable=E0401
 
 
 def _take_top_detections(rois, probs, deltas):

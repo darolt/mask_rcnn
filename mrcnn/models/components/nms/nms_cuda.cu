@@ -81,9 +81,8 @@ __global__ void compute_iou_kernel(
     int start = (row_idx == col_idx) ? thread_idx + 1 : 0;
     for (int i = start; i < col_size; i++) {
       const float *box2 = &block_boxes[i*4];
-      if (compute_iou(cur_box, box2) > threshold) {
+      if (compute_iou(cur_box, box2) > threshold)
         t |= 1ULL << i;
-      }
     }
     // map rectangular grid back to linear grid
     int new_img_idx = img_idx*nb_elements_tri*block_size;
@@ -107,13 +106,14 @@ void compute_nms(
   std::vector<unsigned long long> suppress(nb_col_blocks);
   std::fill(suppress.begin(), suppress.end(), 0);
 
-  int num_to_keep = 0;
+  int num_to_keep = 0, last_index = 0;
   for (int i = 0; i < nb_boxes; i++) {
     int nblock = i / block_size;
     int inblock = i % block_size;
 
     if (!(suppress[nblock] & (1ULL << inblock))) {
       keep[thread_idx][num_to_keep++] = i;
+      last_index = 1;
       unsigned long long *p = &iou_matrix_host[0] +
                               thread_idx*nb_elements_tri*block_size +
                               inblock*nb_elements_tri;
@@ -124,10 +124,38 @@ void compute_nms(
       if (num_to_keep == nb_max_proposals)
         break;
     }
+
   }
+  // nb_max_proposals was not reached, must fill other values
+  while (num_to_keep < nb_max_proposals) {
+    keep[thread_idx][num_to_keep++] = last_index;
+  }
+
   return;
 }
 
+/**
+ * Compute NMS.
+ *
+ * In order to reduce time and memory it works only with the upper
+ * triangle of a matrix (it is not necessary to compute IoU twice).
+ * Matrix is reduced in the following way:
+ *   0   1  2  3  4  5       0  1  2  3  4  5      0  1  2  3  4  5
+ *   6   7  8  9 10 11  p1      7  8  9 10 11 p2      7  8  9 10 11
+ *   12 13 14 15 16 17  -->       14 15 16 17 -->    14 15 16 17
+ *   18 19 20               18 19 20              20 19 18
+ *                          12 13                    13 12
+ *                          6                         6
+ *
+ *   0  1  2  3  4  5
+ *      7  8  9 10 11
+ *        14 15 16 17
+ *           20 19 18
+ *              13 12
+ *                  6
+ * new_row = p1 = rx + rx - row + n%2
+ * new_col = p2 = cx + cx - col + n%2 + 1
+ */
 at::Tensor nms_cuda(const at::Tensor& boxes,
                     const float threshold,
                     const int nb_max_proposals) {
@@ -138,7 +166,7 @@ at::Tensor nms_cuda(const at::Tensor& boxes,
 
   // compute triangular number
   int nb_elements_tri = 0;
-  for (int i=0; i <= nb_col_blocks; i++)
+  for (int i=1; i <= nb_col_blocks; i++)
     nb_elements_tri += i;
   int pivot_row = nb_elements_tri/nb_col_blocks;
   int pivot_col = nb_elements_tri % nb_col_blocks;
@@ -159,13 +187,13 @@ at::Tensor nms_cuda(const at::Tensor& boxes,
   std::vector<unsigned long long> iou_matrix_host(iou_matrix_size);
   THCudaCheck(cudaMemcpy(&iou_matrix_host[0], iou_matrix,
                          iou_matrix_size_bytes, cudaMemcpyDeviceToHost));
+
   THCudaFree(state, iou_matrix);
   at::Tensor keep = at::empty({batch_size, nb_max_proposals},
                               boxes.options().dtype(at::kLong)
                                              .device(at::kCPU)
                                              .requires_grad(false));
-  // maybe there are not enough proposals, so we indicate this with -1
-  keep.fill_(-1);
+
   std::thread threads[batch_size];
   for (int img_idx=0; img_idx < batch_size; img_idx++) {
     threads[img_idx] = std::thread(

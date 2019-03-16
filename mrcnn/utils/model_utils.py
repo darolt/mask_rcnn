@@ -1,5 +1,6 @@
 
 import datetime
+import logging
 import os
 import re
 
@@ -14,6 +15,8 @@ def load_weights(model, filepath, exclude=False):
     some layers from loading.
     exlude: list of layer names to excluce
     """
+    # Load weights
+    logging.info(f"Loading weights from {filepath}")
     if os.path.exists(filepath):
         state_dict = torch.load(filepath)
         if exclude:
@@ -21,7 +24,7 @@ def load_weights(model, filepath, exclude=False):
                           if key not in exclude}
         model.load_state_dict(state_dict, strict=False)
     else:
-        print("Weight file not found ...")
+        print('Weight file not found ...')
 
     # Update the log directory
     set_log_dir(model, filepath)

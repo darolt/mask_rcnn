@@ -7,6 +7,7 @@ Licensed under The MIT License
 Written by Jean Da Rolt
 """
 
+import collections
 import yaml
 
 
@@ -67,7 +68,6 @@ class Config(metaclass=MetaConfig):
         if not Config._DEFAULT_LOADED:
             raise Exception('Default configuration should be loaded '
                             'before loading actual configurations')
-        # TODO check if attributes exist in default
         cls._load(config_fn)
 
     @classmethod
@@ -78,7 +78,7 @@ class Config(metaclass=MetaConfig):
     @classmethod
     def display(cls):
         """Displays configurations."""
-        print(cls.to_string())
+        print(yaml.dump(cls._CURRENT_CFG))
 
     @classmethod
     def freeze(cls):
@@ -99,18 +99,29 @@ class Config(metaclass=MetaConfig):
         Args:
             config_fn: YAML file containing configuration.
         """
+        def dict_update(dict1, other_dict):
+            """
+            Recursively update dict, default update works only for
+            1-level dictionaries.
+            """
+            for k, v in other_dict.items():
+                if isinstance(v, collections.Mapping):
+                    dict1[k] = dict_update(dict1.get(k, {}), v)
+                else:
+                    dict1[k] = v
+            return dict1
+
         with open(config_fn) as stream:
             config_dict = yaml.safe_load(stream)
             if cls._CURRENT_CFG:
-                # TODO implement recursive dict merge
-                cls._CURRENT_CFG.update(config_dict)
+                dict_update(cls._CURRENT_CFG, config_dict)
             else:
                 cls._CURRENT_CFG = config_dict
 
         cls._build_config_tree(cls, config_dict)
 
-    @staticmethod
-    def _build_config_tree(parent, value):
+    @classmethod
+    def _build_config_tree(cls, parent, value):
         """Convert a dictionary to class attributes in a tree-fashion. The root
         object is Config class.
         Note: Recursive function.
@@ -123,9 +134,46 @@ class Config(metaclass=MetaConfig):
                 if isinstance(child_value, dict):
                     child_node = Config.ConfigNode()
                     if not hasattr(parent, child_name):
-                        setattr(parent, child_name, child_node)
+                        if not cls._DEFAULT_LOADED:
+                            setattr(parent, child_name, child_node)
+                        else:
+                            raise Exception(f"Attribute {child_name} not "
+                                            f"defined in base_config.yml")
                     else:
                         child_node = getattr(parent, child_name)
                     Config._build_config_tree(child_node, child_value)
                 else:
-                    setattr(parent, child_name, child_value)
+                    if not cls._DEFAULT_LOADED or (cls._DEFAULT_LOADED) and\
+                       hasattr(parent, child_name):
+                        setattr(parent, child_name, child_value)
+                    else:
+                        raise Exception(f"Attribute {child_name} not "
+                                        f"defined in base_config.yml")
+
+    @classmethod
+    def dump(cls, filename):
+        with open(filename, 'w') as output_file:
+            yaml.dump(cls._to_dict(), output_file)
+
+    @staticmethod
+    def _to_dict(dict_node={}, node=None):
+        if node is None:
+            node = Config
+        if type(node).__name__ not in ['MetaConfig', 'ConfigNode']:
+            if isinstance(node, dict) or isinstance(node, list):
+                return node
+            return str(node).rstrip()
+
+        for child_name, child in node.__dict__.items():
+            if child_name == 'ConfigNode':
+                continue
+            if child_name.startswith('_'):
+                continue
+            if isinstance(node.__dict__[child_name], classmethod):
+                continue
+            if isinstance(node.__dict__[child_name], staticmethod):
+                continue
+            dict_node[child_name] = Config._to_dict(
+                {}, child)
+
+        return dict_node
