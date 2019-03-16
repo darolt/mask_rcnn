@@ -34,7 +34,6 @@ class Config(metaclass=MetaConfig):
     _FROZEN = False
 
     _DEFAULT_LOADED = False
-    _CURRENT_CFG = None
 
     class ConfigNode():  # !pylint: disable=R0903
         """This class is used as an empty object where each instance
@@ -76,7 +75,7 @@ class Config(metaclass=MetaConfig):
     @classmethod
     def to_string(cls):
         """Recursively convert to string."""
-        return str(cls._CURRENT_CFG)
+        return str(_to_dict())
 
     @staticmethod
     def display():
@@ -102,24 +101,9 @@ class Config(metaclass=MetaConfig):
         Args:
             config_fn: YAML file containing configuration.
         """
-        def dict_update(dict1, other_dict):
-            """
-            Recursively update dict, default update works only for
-            1-level dictionaries.
-            """
-            for k, v in other_dict.items():
-                if isinstance(v, collections.Mapping):
-                    dict1[k] = dict_update(dict1.get(k, {}), v)
-                else:
-                    dict1[k] = v
-            return dict1
 
         with open(config_fn) as stream:
             config_dict = yaml.safe_load(stream)
-            if cls._CURRENT_CFG:
-                dict_update(cls._CURRENT_CFG, config_dict)
-            else:
-                cls._CURRENT_CFG = config_dict
 
         cls._build_config_tree(cls, config_dict)
 
