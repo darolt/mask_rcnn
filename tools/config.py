@@ -43,6 +43,9 @@ class Config(metaclass=MetaConfig):
         """
         pass
 
+    class InitNode():
+        pass
+
     def __new__(cls, *args, **kwargs):  # !pylint: disable=W0613
         """This class should not be instantiated."""
         raise Exception('Config class is not meant to be instantiated.')
@@ -75,10 +78,10 @@ class Config(metaclass=MetaConfig):
         """Recursively convert to string."""
         return str(cls._CURRENT_CFG)
 
-    @classmethod
-    def display(cls):
+    @staticmethod
+    def display():
         """Displays configurations."""
-        print(yaml.dump(cls._CURRENT_CFG))
+        print(yaml.dump(_to_dict()))
 
     @classmethod
     def freeze(cls):
@@ -150,30 +153,27 @@ class Config(metaclass=MetaConfig):
                         raise Exception(f"Attribute {child_name} not "
                                         f"defined in base_config.yml")
 
-    @classmethod
-    def dump(cls, filename):
-        with open(filename, 'w') as output_file:
-            yaml.dump(cls._to_dict(), output_file)
-
     @staticmethod
-    def _to_dict(dict_node={}, node=None):
-        if node is None:
-            node = Config
-        if type(node).__name__ not in ['MetaConfig', 'ConfigNode']:
-            if isinstance(node, dict) or isinstance(node, list):
-                return node
-            return str(node).rstrip()
+    def dump(filename):
+        with open(filename, 'w') as output_file:
+            yaml.dump(_to_dict(), output_file)
 
-        for child_name, child in node.__dict__.items():
-            if child_name == 'ConfigNode':
-                continue
-            if child_name.startswith('_'):
-                continue
-            if isinstance(node.__dict__[child_name], classmethod):
-                continue
-            if isinstance(node.__dict__[child_name], staticmethod):
-                continue
-            dict_node[child_name] = Config._to_dict(
-                {}, child)
 
-        return dict_node
+def _to_dict(dict_node={}, node=Config):
+    if type(node).__name__ not in ['MetaConfig', 'ConfigNode']:
+        if isinstance(node, (dict, list)):
+            return node
+        return str(node).rstrip()
+
+    for child_name, child in node.__dict__.items():
+        if child_name == 'ConfigNode':
+            continue
+        if child_name.startswith('_'):
+            continue
+        if isinstance(node.__dict__[child_name], classmethod):
+            continue
+        if isinstance(node.__dict__[child_name], staticmethod):
+            continue
+        dict_node[child_name] = _to_dict({}, child)
+
+    return dict_node
