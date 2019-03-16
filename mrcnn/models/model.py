@@ -266,7 +266,7 @@ class MaskRCNN(nn.Module):
 
                 if rois_.nelement() == 0:
                     mrcnn_out = MRCNNOutput().to(Config.DEVICE)
-                    logging.info('Rois size is empty')
+                    logging.debug('Rois size is empty')
                 else:
                     # Network Heads
                     # Proposal classifier and BBox regressor heads
