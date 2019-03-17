@@ -44,6 +44,7 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     image = dataset_handler.load_image(image_id)
     mask, class_ids = dataset_handler.load_mask(image_id)
     image, image_metas = utils.mold_image(image)
+    image_metas.image_id = image_id
     mask = utils.resize_mask(mask, image_metas.scale,
                              image_metas.padding, image_metas.crop)
 
@@ -64,8 +65,10 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
         mask = det.augment_image(mask.astype(np.uint8),
                                  hooks=imgaug.HooksImages(activator=hook))
         # Verify that shapes didn't change
-        assert image.shape == image_shape, "Augmentation shouldn't change image size"
-        assert mask.shape == mask_shape, "Augmentation shouldn't change mask size"
+        assert image.shape == image_shape,\
+            'Augmentation should not change image size'
+        assert mask.shape == mask_shape,\
+            'Augmentation should not change mask size'
         # Change mask back to bool
         mask = mask.astype(np.bool)
 
@@ -83,16 +86,17 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     # Active classes
     # Different dataset_handlers have different classes, so track the
     # classes supported in the dataset_handler of this image.
-    active_class_ids = np.zeros([dataset_handler.num_classes], dtype=np.int32)
-    source_class_ids = dataset_handler.source_class_ids[dataset_handler.image_info[image_id]["source"]]
-    active_class_ids[source_class_ids] = 1
+    # active_class_ids = np.zeros([dataset_handler.num_classes], dtype=np.int32)
+    # source_class_ids = dataset_handler.source_class_ids[
+    #     dataset_handler.image_info[image_id]['source']]
+    # active_class_ids[source_class_ids] = 1
 
     # Resize masks to smaller size to reduce memory usage
     if use_mini_mask:
         mask = utils.minimize_masks(bbox, mask, Config.MINI_MASK.SHAPE)
 
     # Image meta data
-    image_metas.active_class_ids = active_class_ids
+    image_metas.active_class_ids = np.unique(class_ids)
 
     return image, image_metas, class_ids, bbox, mask
 

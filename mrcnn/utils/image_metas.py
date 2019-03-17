@@ -11,11 +11,9 @@ import numpy as np
 
 class ImageMetas():
     """Stores image metas."""
-    def __init__(self, image_id, original_shape, window=None, scale=1,
+    def __init__(self, original_shape, window=None, scale=1,
                  padding=((0, 0), (0, 0), (0, 0)),
-                 crop=(-1, -1, -1, -1),
-                 active_class_ids=(0, 1)):
-        self.image_id = image_id
+                 crop=None):
         self.original_shape = original_shape
         if window is None:
             self.window = (0, 0, original_shape[0], original_shape[1])
@@ -23,11 +21,9 @@ class ImageMetas():
             self.window = window
         self.scale = scale
         self.padding = padding
-        if crop is None:
-            self.crop = (-1, -1, -1, -1)
-        else:
-            self.crop = crop
-        self.active_class_ids = active_class_ids
+        self.crop = crop
+        self.image_id = None
+        self.active_class_ids = None
 
     def to_numpy(self):
         """Takes attributes of an image and puts them in one 1D array. Use

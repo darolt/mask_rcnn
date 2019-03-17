@@ -314,7 +314,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
     crop = None
 
     if mode == 'none':
-        return image, ImageMetas(0, original_shape, window,
+        return image, ImageMetas(original_shape, window,
                                  scale, padding, crop)
 
     # Scale?
@@ -384,10 +384,10 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
     else:
         raise Exception(f"Mode {mode} not supported")
     return (image.astype(image_dtype),
-            ImageMetas(0, original_shape, window, scale, padding, crop))
+            ImageMetas(original_shape, window, scale, padding, crop))
 
 
-def resize_mask(mask, scale, padding, crop=None):
+def resize_mask(mask, scale, padding, crop):
     """Resizes a mask using the given scale and padding.
     Typically, you get the scale and padding from resize_image() to
     ensure both, the image and the mask, are resized consistently.
