@@ -5,6 +5,7 @@ import torch
 from tools.config import Config
 from mrcnn.models.components.nms import nms_wrapper  # pylint: disable=E0401,E0611
 from mrcnn.utils import utils
+from mrcnn.utils.exceptions import NoBoxToKeep
 
 
 def _take_top_detections(rois, probs, deltas):
@@ -98,6 +99,9 @@ def detection_layer(rois, probs, deltas):
         greater_scores = class_probs >= Config.DETECTION.MIN_CONFIDENCE
         keep_fg = keep_fg & greater_scores
     keep = keep_fg.nonzero().squeeze(1)
+
+    if keep.nelement() == 0:
+        raise NoBoxToKeep
 
     # Apply per-class NMS
     keep = _apply_nms(class_ids, class_probs, refined_rois, keep)

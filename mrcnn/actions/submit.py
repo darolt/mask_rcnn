@@ -13,8 +13,8 @@ import matplotlib
 import torch
 
 from mrcnn.functions.metrics import compute_map_metric
-from mrcnn.utils import visualize
-from mrcnn.utils import utils
+from mrcnn.utils import utils, visualize
+from mrcnn.utils.exceptions import NoBoxHasPositiveArea, NoBoxToKeep
 from mrcnn.utils.rle import mask_to_rle
 from tools.config import Config
 
@@ -43,7 +43,15 @@ def submit(model, dataset, results_dir, analyzer=None):
         image = dataset.load_image(image_id)
         image_name = dataset.image_info[image_id]['id']
         # Detect objects
-        result, _ = model.detect(image)
+        try:
+            result, _ = model.detect(image)
+        except NoBoxHasPositiveArea:
+            print('No box has positive area.')
+            continue
+        except NoBoxToKeep:
+            print('No box to keep.')
+            continue
+
         result = analyzer.filter(result)
 
         # Compute metric

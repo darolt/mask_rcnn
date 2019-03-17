@@ -7,11 +7,8 @@ Licensed under the MIT License (see LICENSE for details)
 Written by Waleed Abdulla
 """
 
-import logging
 import math
 import random
-import shutil
-import urllib.request
 import warnings
 
 import numpy as np
@@ -23,6 +20,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mrcnn.structs.detection_output import DetectionOutput
+from mrcnn.utils.exceptions import NoBoxHasPositiveArea
 from mrcnn.utils.image_metas import ImageMetas
 from tools.config import Config
 
@@ -500,7 +498,8 @@ def remove_zero_area(boxes, class_ids, masks, scores=None):
     skip = too_small + too_short + too_thin
     positive_area = torch.nonzero(skip == 0)
     if positive_area.nelement() == 0:
-        raise Exception('No box has positive area.')
+        raise NoBoxHasPositiveArea
+
     keep_ix = positive_area[:, 0]
     if keep_ix.shape[0] != boxes.shape[0]:
         boxes = boxes[keep_ix]
