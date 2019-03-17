@@ -53,6 +53,15 @@ class ImageMetas():
             dtype=np.float32)
         return meta
 
+    def __str__(self):
+        return (f"image_id: {self.image_id}, "
+                f"original_shape: {self.original_shape}, "
+                f"window: {self.window}, "
+                f"scale: {self.scale}, "
+                f"padding: {self.padding}', "
+                f"crop: {self.crop}, "
+                f"active_class_ids: {self.active_class_ids}")
+
 
 def build_metas_from_numpy(meta):
     """Parses an image info Numpy array to its components.

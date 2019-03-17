@@ -26,12 +26,10 @@ import logging
 import os
 import sys
 
-import numpy as np
 import torch
 
 from mrcnn.actions.train import train
 from mrcnn.actions.submit import submit
-from mrcnn.actions.analyze import analyze
 from mrcnn.config import mrcnn_config
 from mrcnn.utils.mrcnn_parser import MRCNNParser
 from mrcnn.utils.model_utils import load_weights
@@ -89,19 +87,12 @@ if __name__ == '__main__':
             dataset_val = NucleusDatasetHandler(Config.DATASET_PATH,
                                                 'val')
             # analyzer = analyze(dataset_train)
-            Config.unfreeze()
-            Config.NUM_CLASSES = 2
-            Config.IMAGE.MEAN_PIXEL = np.array([55.0, 55.0, 55.0])
-            Config.freeze()
             load_weights(model, args.model, exclude=EXCLUDE)
             model.build()
             train(model, dataset_train, dataset_val)
         elif args.command == 'submit':
             dataset = NucleusDatasetHandler(Config.DATASET_PATH, 'stage1_test')
-            analyzer = analyze(dataset)
-            Config.unfreeze()
-            Config.IMAGE.MEAN_PIXEL = analyzer.mean_pixel
-            Config.freeze()
+            # analyzer = analyze(dataset)
             load_weights(model, args.model)
             model.build()
-            submit(model, dataset, RESULTS_DIR, analyzer=analyzer)
+            submit(model, dataset, RESULTS_DIR)

@@ -49,7 +49,8 @@ def submit(model, dataset, results_dir, analyzer=None):
             print(e)
             continue
 
-        result = analyzer.filter(result)
+        if analyzer is not None:
+            result = analyzer.filter(result)
 
         # Compute metric
         gt_masks, _ = dataset.load_mask(image_id)

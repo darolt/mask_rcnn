@@ -9,7 +9,7 @@ import torch
 from tools.config import Config
 
 
-def init_config(config_fns, cmd_args):
+def init_config(config_fns, cmd_args=None):
     """Loads configurations from YAML files, then create utilitaire
     configurations. Freeze config and display it.
     """
@@ -20,14 +20,14 @@ def init_config(config_fns, cmd_args):
     if Config.GPU_COUNT and torch.cuda.device_count() > 0:
         Config.DEVICE_NB = int(Config.DEVICE.split(':')[1])
         Config.DEVICE = torch.device(Config.DEVICE)
-        if str(cmd_args.dev) in '123456789':
+        if cmd_args is not None and str(cmd_args.dev) in '123456789':
             Config.DEVICE = torch.device('cuda:' + str(cmd_args.dev))
             Config.DEVICE_NB = cmd_args.dev
     else:
         Config.DEVICE_NB = 0
         Config.DEVICE = torch.device('cpu')
 
-    if cmd_args.dataset:
+    if cmd_args is not None and cmd_args.dataset:
         Config.DATASET_PATH = cmd_args.dataset
 
     if Config.GPU_COUNT > 0:
