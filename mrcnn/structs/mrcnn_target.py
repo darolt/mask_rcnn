@@ -8,8 +8,8 @@ from tools.config import Config
 class MRCNNTarget(TensorContainer):
     def __init__(self,
                  mask_shape,
-                 class_ids=torch.FloatTensor(),
-                 deltas=torch.IntTensor(),
+                 class_ids=torch.IntTensor(),
+                 deltas=torch.FloatTensor(),
                  masks=torch.FloatTensor()):
         self._mask_shape = mask_shape
         self.class_ids = class_ids
@@ -17,8 +17,8 @@ class MRCNNTarget(TensorContainer):
         self.masks = masks
 
     def zeros(self, size):
-        self.class_ids = torch.zeros(size)
-        self.deltas = torch.zeros(size, 4, dtype=torch.int)
+        self.class_ids = torch.zeros(size, dtype=torch.int)
+        self.deltas = torch.zeros(size, 4, dtype=torch.float32)
         self.masks = torch.zeros(size, self._mask_shape[0],
                                  self._mask_shape[1])
         return self
