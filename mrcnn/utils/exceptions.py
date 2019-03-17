@@ -1,8 +1,10 @@
 
 
 class NoBoxHasPositiveArea(Exception):
-    pass
+    def __init__(self):
+        Exception.__init__(self, 'No box has positive area.')
 
 
 class NoBoxToKeep(Exception):
-    pass
+    def __init__(self):
+        Exception.__init__(self, 'No box to keep in detection.')

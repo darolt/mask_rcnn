@@ -45,11 +45,8 @@ def submit(model, dataset, results_dir, analyzer=None):
         # Detect objects
         try:
             result, _ = model.detect(image)
-        except NoBoxHasPositiveArea:
-            print('No box has positive area.')
-            continue
-        except NoBoxToKeep:
-            print('No box to keep.')
+        except (NoBoxHasPositiveArea, NoBoxToKeep) as e:
+            print(e)
             continue
 
         result = analyzer.filter(result)
