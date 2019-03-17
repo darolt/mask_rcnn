@@ -7,7 +7,6 @@ Licensed under The MIT License
 Written by Jean Da Rolt
 """
 
-import collections
 import yaml
 
 
@@ -40,9 +39,6 @@ class Config(metaclass=MetaConfig):
         will store different attributes according to the configuration
         tree.
         """
-        pass
-
-    class InitNode():
         pass
 
     def __new__(cls, *args, **kwargs):  # !pylint: disable=W0613
