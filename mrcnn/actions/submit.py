@@ -22,6 +22,7 @@ from tools.config import Config
 def submit(model, dataset, results_dir, analyzer=None):
     """Run detection on images in the given directory."""
 
+    Config.dump(os.path.join(model.log_dir, 'config.yml'))
     matplotlib.use('Agg')
     logging.info(f"Running on {dataset.dataset_dir}")
 
