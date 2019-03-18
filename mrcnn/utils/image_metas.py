@@ -13,7 +13,7 @@ class ImageMetas():
     """Stores image metas."""
     def __init__(self, original_shape, window=None, scale=1,
                  padding=((0, 0), (0, 0), (0, 0)),
-                 crop=None):
+                 crop=None, active_class_ids=None, image_id=None):
         self.original_shape = original_shape
         if window is None:
             self.window = (0, 0, original_shape[0], original_shape[1])
@@ -22,8 +22,8 @@ class ImageMetas():
         self.scale = scale
         self.padding = padding
         self.crop = crop
-        self.image_id = None
-        self.active_class_ids = None
+        self.image_id = image_id
+        self.active_class_ids = active_class_ids
 
     def to_numpy(self):
         """Takes attributes of an image and puts them in one 1D array. Use
@@ -63,11 +63,11 @@ def build_metas_from_numpy(meta):
     """Parses an image info Numpy array to its components.
     See to_numpy() for more details.
     """
-    metas = ImageMetas(meta[0],  # image_id
-                       meta[1:4],  # original_shape
+    metas = ImageMetas(meta[1:4],  # original_shape
                        meta[4:8],   # window
                        meta[8],  # scale
                        meta[9:15].reshape((3, 2)),  # padding
                        meta[15:19],  # crop
-                       meta[19:])  # active_class_ids
+                       meta[19:],  # active_class_ids
+                       meta[0])  # image_id
     return metas
