@@ -88,11 +88,9 @@ if __name__ == '__main__':
                                                 'val')
             # analyzer = analyze(dataset_train)
             load_weights(model, args.model, exclude=EXCLUDE)
-            model.build()
             train(model, dataset_train, dataset_val)
         elif args.command == 'submit':
             dataset = NucleusDatasetHandler(Config.DATASET_PATH, 'stage1_test')
             # analyzer = analyze(dataset)
             load_weights(model, args.model)
-            model.build()
             submit(model, dataset, RESULTS_DIR)

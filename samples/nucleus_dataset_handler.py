@@ -58,7 +58,7 @@ class NucleusDatasetHandler(DatasetHandler):
         """
         # Add classes. We have one class.
         # Naming the dataset nucleus, and the class nucleus
-        self.add_class("nucleus", 1, "nucleus")
+        self.add_class('nucleus', 1, 'nucleus')
 
         # Which subset?
         # "val": use hard-coded list above
@@ -79,7 +79,7 @@ class NucleusDatasetHandler(DatasetHandler):
 
         # Add images
         for image_id in image_ids:
-            image_name = "images/{}.png".format(image_id)
+            image_name = f"images/{image_id}.png"
             self.add_image(
                 'nucleus',
                 image_id=image_id,
@@ -95,13 +95,13 @@ class NucleusDatasetHandler(DatasetHandler):
         """
         info = self.image_info[image_id]
         # Get mask directory from image path
-        mask_dir = os.path.join(os.path.dirname(os.path.dirname(info['path'])),
-                                "masks")
+        mask_dir = os.path.join(
+            os.path.dirname(os.path.dirname(info['path'])), 'masks')
 
         # Read mask files from .png image
         masks = []
         for file in next(os.walk(mask_dir))[2]:
-            if file.endswith(".png"):
+            if file.endswith('.png'):
                 mask = imread(os.path.join(mask_dir, file),
                               as_gray=True).astype(np.bool)
                 masks.append(mask)
@@ -113,7 +113,7 @@ class NucleusDatasetHandler(DatasetHandler):
     def image_reference(self, image_id):
         """Return the path of the image."""
         info = self.image_info[image_id]
-        if info["source"] == "nucleus":
-            return info["id"]
+        if info['source'] == 'nucleus':
+            return info['id']
         else:
-            super(self.__class__, self).image_reference(image_id)
+            super.image_reference(image_id)

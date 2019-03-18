@@ -76,7 +76,7 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     # cropped out and here is to filter them out
     _idx = np.sum(mask, axis=(0, 1)) > 0
     mask = mask[:, :, _idx]
-    class_ids = class_ids[_idx]
+    filtered_class_ids = class_ids[_idx]
 
     # Bounding boxes. Note that some boxes might be all zeros
     # if the corresponding mask got cropped out.
@@ -86,10 +86,8 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     # Active classes
     # Different dataset_handlers have different classes, so track the
     # classes supported in the dataset_handler of this image.
-    # active_class_ids = np.zeros([dataset_handler.num_classes], dtype=np.int32)
-    # source_class_ids = dataset_handler.source_class_ids[
-    #     dataset_handler.image_info[image_id]['source']]
-    # active_class_ids[source_class_ids] = 1
+    active_class_ids = np.zeros([dataset_handler.num_classes], dtype=np.int32)
+    active_class_ids[class_ids] = 1
 
     # Resize masks to smaller size to reduce memory usage
     if use_mini_mask:
@@ -98,10 +96,10 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     # Image meta data
     image_metas.active_class_ids = np.unique(class_ids)
 
-    return image, image_metas, class_ids, bbox, mask
+    return image, image_metas, filtered_class_ids, bbox, mask
 
 
-def build_rpn_targets(image_shape, anchors, gt_class_ids, gt_boxes):
+def build_rpn_targets(anchors, gt_class_ids, gt_boxes):
     """Given the anchors and GT boxes, compute overlaps and identify positive
     anchors and deltas to refine them to match their corresponding GT boxes.
 
@@ -274,8 +272,8 @@ class DataGenerator(Dataset):
                 break
 
         # RPN Targets
-        rpn_match, rpn_bbox = build_rpn_targets(image.shape, self.anchors,
-                                                gt_class_ids, gt_boxes)
+        rpn_match, rpn_bbox = build_rpn_targets(
+            self.anchors, gt_class_ids, gt_boxes)
 
         # If more instances than fits in the array, sub-sample from them.
         if gt_boxes.shape[0] > Config.PROPOSALS.MAX_GT_INSTANCES:

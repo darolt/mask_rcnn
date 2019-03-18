@@ -521,7 +521,7 @@ def to_img_domain(boxes, image_metas):
                           device=Config.DEVICE)
 
     # Translate bounding boxes to image domain
-    boxes = ((boxes - shifts) / image_metas.scale)
+    boxes = ((boxes - shifts)/image_metas.scale)
     original_box = (0, 0, image_shape[0], image_shape[1])
     boxes = clip_boxes(boxes, original_box, squeeze=True)
     return boxes

@@ -1,6 +1,4 @@
 
-import torch
-
 from mrcnn.models.components.nms import nms_wrapper  # pylint: disable=E0611
 from mrcnn.utils import utils
 from tools.config import Config
@@ -52,6 +50,6 @@ def proposal_layer(scores, deltas, proposal_count, nms_threshold, anchors):
         proposal_count)
 
     # Normalize dimensions to range of 0 to 1.
-    normalized_boxes = boxes / Config.RPN.NORM
+    normalized_boxes = boxes/Config.RPN.NORM
 
     return normalized_boxes

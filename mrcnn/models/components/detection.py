@@ -1,5 +1,4 @@
 
-import numpy as np
 import torch
 
 from tools.config import Config
@@ -30,14 +29,10 @@ def _to_input_domain(rois, probs, deltas):
         rois, top_deltas.unsqueeze(0)).squeeze(0)
 
     # Convert coordinates to image domain
-    height, width = Config.IMAGE.SHAPE[:2]
-    scale = torch.from_numpy(np.array([height, width, height, width]))
-    scale = scale.to(Config.DEVICE).float()
-
-    refined_rois = refined_rois * scale
+    refined_rois = refined_rois * Config.RPN.NORM
     # Clip boxes to image window
-    window = (0, 0, height, width)
-    refined_rois = utils.clip_boxes(refined_rois, window, squeeze=True)
+    refined_rois = utils.clip_boxes(
+        refined_rois, Config.RPN.CLIP_WINDOW, squeeze=True)
 
     return refined_rois, top_class_ids, top_class_probs
 

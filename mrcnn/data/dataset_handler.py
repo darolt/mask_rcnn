@@ -22,7 +22,7 @@ class DatasetHandler(metaclass=ABCMeta):
     See COCODataset and ShapesDataset as examples.
     """
 
-    def __init__(self, class_map=None):
+    def __init__(self):
         self._image_ids = []
         self.image_info = []
         # Background is always the first class
@@ -64,7 +64,7 @@ class DatasetHandler(metaclass=ABCMeta):
         """
         return ""
 
-    def prepare(self, class_map=None):
+    def prepare(self):
         """Prepares the Dataset class for use.
 
         TODO: class map is not supported yet. When done, it should handle mapping
@@ -110,10 +110,10 @@ class DatasetHandler(metaclass=ABCMeta):
         assert info['source'] == source
         return info['id']
 
-    def append_data(self, class_info, image_info):
+    def append_data(self):
         self.external_to_class_id = {}
         for i, c in enumerate(self.class_info):
-            for ds, id in c["map"]:
+            for ds, id in c['map']:
                 self.external_to_class_id[ds + str(id)] = i
 
         # Map external image IDs to internal ones.
@@ -142,7 +142,7 @@ class DatasetHandler(metaclass=ABCMeta):
         Override this to return a URL to the image if it's availble online for easy
         debugging.
         """
-        return self.image_info[image_id]["path"]
+        return self.image_info[image_id]['path']
 
     def load_image(self, image_id):
         """Load the specified image and return a [H,W,3] Numpy array.
@@ -172,4 +172,4 @@ class DatasetHandler(metaclass=ABCMeta):
         """
         # Override this function to load a mask from your dataset.
         # Otherwise, it returns an empty mask.
-        pass
+        raise Exception('load_mask not implemented.')

@@ -117,30 +117,25 @@ def detection_target_layer(proposals, gt_class_ids, gt_boxes, gt_masks):
     else:
         negative_count = 0
 
+    logging.debug(f"positive_count: {positive_count}, "
+                  f"negative_count: {negative_count}")
+
     # Append negative ROIs and pad bbox deltas and masks that
     # are not used for negative ROIs with zeros.
     if positive_count > 0 and negative_count > 0:
         rois = torch.cat((positive_rois, negative_rois), dim=0)
         mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE,
                                     roi_gt_class_ids, deltas, masks)
-                        .to(Config.DEVICE)
                         .fill_zeros(negative_count))
     elif positive_count > 0:
         rois = positive_rois
-        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE,
-                                    roi_gt_class_ids, deltas, masks)
-                        .to(Config.DEVICE))
-    elif negative_count > 0:
-        rois = negative_rois
-        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE)
-                        .to(Config.DEVICE)
-                        .zeros(negative_count))
+        mrcnn_target = MRCNNTarget(Config.HEADS.MASK.SHAPE,
+                                   roi_gt_class_ids, deltas, masks)
     else:
         rois = torch.FloatTensor().to(Config.DEVICE)
-        mrcnn_target = (MRCNNTarget(Config.HEADS.MASK.SHAPE)
-                        .to(Config.DEVICE))
+        mrcnn_target = MRCNNTarget(Config.HEADS.MASK.SHAPE)
 
-    return rois, mrcnn_target
+    return rois, mrcnn_target.to(Config.DEVICE)
 
 
 def _bbox_overlaps(boxes1, boxes2):

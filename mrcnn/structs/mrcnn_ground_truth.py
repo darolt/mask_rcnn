@@ -1,3 +1,4 @@
+
 import torch
 
 from mrcnn.structs.tensor_container import TensorContainer
@@ -5,7 +6,7 @@ from mrcnn.structs.tensor_container import TensorContainer
 
 class MRCNNGroundTruth(TensorContainer):
     def __init__(self,
-                 class_ids=torch.FloatTensor(),
+                 class_ids=torch.IntTensor(),
                  boxes=torch.FloatTensor(),
                  masks=torch.FloatTensor()):
         self.class_ids = class_ids

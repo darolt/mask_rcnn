@@ -61,6 +61,8 @@ class MaskRCNN(nn.Module):
         super(MaskRCNN, self).__init__()
         self.model_dir = model_dir
         set_log_dir(self)
+        self.build()
+        self.initialize_weights()
 
     def build(self):
         """Build Mask R-CNN architecture.
@@ -107,7 +109,6 @@ class MaskRCNN(nn.Module):
                     parameter.requires_grad = False
 
         self.apply(set_bn_fix)
-        self.initialize_weights()
         self.to(Config.DEVICE)
 
     def initialize_weights(self):
@@ -152,10 +153,8 @@ class MaskRCNN(nn.Module):
         molded_image, image_metas = utils.mold_inputs([image])
 
         # Convert images to torch tensor
-        molded_image = torch.from_numpy(molded_image.transpose(0, 3, 1, 2))
-
-        # To GPU
-        molded_image = molded_image.to(Config.DEVICE).float()
+        molded_image = (torch.from_numpy(molded_image).float()
+                        .permute(0, 3, 1, 2).to(Config.DEVICE))
 
         # Run object detection
         self.eval()
@@ -260,24 +259,24 @@ class MaskRCNN(nn.Module):
             mrcnn_targets, mrcnn_outs = [], []
             for img_idx in range(0, batch_size):
                 with torch.no_grad():
-                    rois_, mrcnn_target = detection_target_layer(
+                    rois, mrcnn_target = detection_target_layer(
                         rpn_rois[img_idx], gt.class_ids[img_idx],
                         gt.boxes[img_idx], gt.masks[img_idx])
 
-                if rois_.nelement() == 0:
+                if rois.nelement() == 0:
                     mrcnn_out = MRCNNOutput().to(Config.DEVICE)
                     logging.debug('Rois size is empty')
                 else:
                     # Network Heads
                     # Proposal classifier and BBox regressor heads
-                    rois_ = rois_.unsqueeze(0)
+                    rois = rois.unsqueeze(0)
                     mrcnn_feature_maps_batch = [x[img_idx].unsqueeze(0).detach()
                                                 for x in mrcnn_feature_maps]
                     mrcnn_class_logits_, _, mrcnn_deltas_ = \
-                        self.classifier(mrcnn_feature_maps_batch, rois_)
+                        self.classifier(mrcnn_feature_maps_batch, rois)
 
                     # Create masks
-                    mrcnn_mask_ = self.mask(mrcnn_feature_maps_batch, rois_)
+                    mrcnn_mask_ = self.mask(mrcnn_feature_maps_batch, rois)
 
                     mrcnn_out = MRCNNOutput(mrcnn_class_logits_,
                                             mrcnn_deltas_, mrcnn_mask_)
@@ -445,9 +444,9 @@ class MaskRCNN(nn.Module):
     def _prepare_inputs(inputs):
         images = inputs[0].to(Config.DEVICE)
         image_metas = inputs[1]
-        rpn_target = RPNTarget(inputs[2], inputs[3])
-        gt = MRCNNGroundTruth(inputs[4], inputs[5], inputs[6])
-        rpn_target.to(Config.DEVICE)
-        gt.to(Config.DEVICE)
+        rpn_target = (RPNTarget(inputs[2], inputs[3])
+                      .to(Config.DEVICE))
+        gt = (MRCNNGroundTruth(inputs[4], inputs[5], inputs[6])
+              .to(Config.DEVICE))
 
         return (images, image_metas, rpn_target, gt)
