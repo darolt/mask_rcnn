@@ -38,10 +38,10 @@ def submit(model, dataset, results_dir, analyzer=None):
     summary = {}
     precisions = torch.empty((len(dataset)), device=Config.DEVICE)
     for image_id in dataset.image_ids:
-        logging.info(f"Predicting for image {image_id}")
+        image_name = dataset.image_info[image_id]['id']
+        logging.info(f"Predicting for image {image_name}")
         # Load image and run detection
         image = dataset.load_image(image_id)
-        image_name = dataset.image_info[image_id]['id']
         # Detect objects
         try:
             result, _ = model.detect(image)
@@ -54,6 +54,9 @@ def submit(model, dataset, results_dir, analyzer=None):
 
         # Compute metric
         gt_masks, _ = dataset.load_mask(image_id)
+        if gt_masks.shape == (0,):
+            logging.info(f"Image {image_name} has no mask.")
+            continue
         gt_boxes = torch.from_numpy(
             utils.extract_bboxes(gt_masks)).to(Config.DEVICE)
         gt_masks = torch.from_numpy(gt_masks.astype(int))
