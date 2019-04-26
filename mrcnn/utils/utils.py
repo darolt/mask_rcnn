@@ -182,7 +182,8 @@ def mold_image(image):
         min_dim=Config.IMAGE.MIN_DIM,
         max_dim=Config.IMAGE.MAX_DIM,
         min_scale=Config.IMAGE.MIN_SCALE,
-        mode=Config.IMAGE.RESIZE_MODE)
+        mode=Config.IMAGE.RESIZE_MODE,
+        input_shape=Config.IMAGE.SHAPE)
     molded_image = subtract_mean(molded_image)
 
     return molded_image, image_metas
@@ -273,7 +274,7 @@ def unmold_boxes(boxes, class_ids, masks, image_metas, scores=None):
 
 
 def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
-                 mode='square'):
+                 mode='square', input_shape=None):
     """Resizes an image keeping the aspect ratio unchanged.
 
     min_dim: if provided, resizes the image such that it's smaller
@@ -319,13 +320,20 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
         return image, ImageMetas(original_shape, window,
                                  scale, padding, crop)
 
+    if mode == 'resize':
+        image = skimage.transform.resize(
+                    image, input_shape,
+                    order=1, mode='constant', preserve_range=True)
+        return image, ImageMetas(original_shape, window,
+                                 scale, padding, crop)
+
     # Scale?
     if min_dim and mode != 'pad64':
         # Scale up but not down
         scale = max(1, min_dim / min(h, w))
     if min_scale:
         scale = max(scale, min_scale)
-    if mode == 'pad64':
+    if min_dim and mode == 'pad64':
         scale = min_dim/max(h, w)
 
     # Does it exceed max dim?
