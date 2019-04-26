@@ -100,7 +100,7 @@ IMAGE:
     RESIZE_MODE: square
     MIN_DIM: 800
     MAX_DIM: 1024
-    MIN_SCALE: 0
+    MIN_SCALE: ~
     # Image mean (RGB)
     MEAN_PIXEL: ~  # [125, 125, 125], set at runtime
     SHAPE: ~  # [0, 0], set at runtime

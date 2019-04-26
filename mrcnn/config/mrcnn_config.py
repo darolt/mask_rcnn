@@ -44,8 +44,11 @@ def init_config(config_fns, cmd_args=None):
     Config.TRAINING.VALIDATION_STEPS = 25 // Config.IMAGES_PER_GPU
 
     # Input image size
-    Config.IMAGE.SHAPE = np.array(
-        [Config.IMAGE.MAX_DIM, Config.IMAGE.MAX_DIM, 3])
+    if Config.IMAGE.SHAPE is None:
+        Config.IMAGE.SHAPE = np.array(
+            [Config.IMAGE.MAX_DIM, Config.IMAGE.MAX_DIM, 3])
+    else:
+        Config.IMAGE.SHAPE = np.array(Config.IMAGE.SHAPE)
 
     # Compute backbone size from input image size
     Config.BACKBONE.SHAPES = np.array(
