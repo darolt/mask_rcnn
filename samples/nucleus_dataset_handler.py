@@ -39,9 +39,10 @@ class NucleusDatasetHandler(DatasetHandler):
         "8ecdb93582b2d5270457b36651b62776256ade3aaa2d7432ae65c14f07432d49",
     ]
 
-    def __init__(self, dataset_dir, subset):
+    def __init__(self, dataset_dir, subset, dataset_name):
         super().__init__()
         self.dataset_dir = dataset_dir
+        self.dataset_name = dataset_name
         self.load_nuclei(dataset_dir, subset)
         self.prepare()
         micro_model = MicroscopeModel(3)
@@ -58,7 +59,7 @@ class NucleusDatasetHandler(DatasetHandler):
         """
         # Add classes. We have one class.
         # Naming the dataset nucleus, and the class nucleus
-        self.add_class('nucleus', 1, 'nucleus')
+        self.add_class(self.dataset_name, 1, 'nucleus')
 
         # Which subset?
         # "val": use hard-coded list above
@@ -81,7 +82,7 @@ class NucleusDatasetHandler(DatasetHandler):
         for image_id in image_ids:
             image_name = f"images/{image_id}.png"
             self.add_image(
-                'nucleus',
+                self.dataset_name,
                 image_id=image_id,
                 path=os.path.join(dataset_dir, image_id, image_name)
             )
@@ -113,7 +114,7 @@ class NucleusDatasetHandler(DatasetHandler):
     def image_reference(self, image_id):
         """Return the path of the image."""
         info = self.image_info[image_id]
-        if info['source'] == 'nucleus':
+        if info['source'] == self.dataset_name:
             return info['id']
         else:
             super.image_reference(image_id)

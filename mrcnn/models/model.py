@@ -152,10 +152,6 @@ class MaskRCNN(nn.Module):
         # Mold inputs to format expected by the neural network
         molded_image, image_metas = utils.mold_inputs([image])
 
-        # Convert images to torch tensor
-        molded_image = (torch.from_numpy(molded_image).float()
-                        .permute(0, 3, 1, 2).to(Config.DEVICE))
-
         # Run object detection
         self.eval()
         self.apply(self._set_bn_eval)
@@ -207,14 +203,14 @@ class MaskRCNN(nn.Module):
         # Proposal classifier and BBox regressor heads
         mrcnn_feature_maps_batch = [x[0].unsqueeze(0)
                                     for x in mrcnn_feature_maps]
-        _, mrcnn_class, mrcnn_deltas = \
+        _, mrcnn_probs, mrcnn_deltas = \
             self.classifier(mrcnn_feature_maps_batch, rpn_rois[0])
 
         # Detections output is
         # [batch, num_detections, (y1, x1, y2, x2, class_id, score)]
         # in image coordinates
         with torch.no_grad():
-            detections = detection_layer(rpn_rois, mrcnn_class,
+            detections = detection_layer(rpn_rois, mrcnn_probs,
                                          mrcnn_deltas)
 
         detection_boxes = detections[:, :4]/Config.RPN.NORM

@@ -7,12 +7,10 @@ from mrcnn.utils import utils
 from mrcnn.utils.exceptions import NoBoxToKeep
 
 
-def _take_top_detections(rois, probs, deltas):
+def _take_top_detections(probs, deltas):
     """For each ROI, takes TOP probs, ids and deltas."""
-    nb_rois = rois.shape[0]
-    # IDs, probs and deltas for top class
     top_class_probs, top_class_ids = probs.max(dim=1)
-    top_deltas = deltas[range(nb_rois), top_class_ids]
+    top_deltas = deltas[range(top_class_ids.shape[0]), top_class_ids]
     return top_class_probs, top_class_ids, top_deltas
 
 
@@ -20,11 +18,11 @@ def _to_input_domain(rois, probs, deltas):
     # Currently only supports batchsize 1
 
     top_class_probs, top_class_ids, top_deltas = \
-        _take_top_detections(rois, probs, deltas)
+        _take_top_detections(probs, deltas)
 
     # Apply bounding box deltas
     # Shape: [boxes, (y1, x1, y2, x2)] in normalized coordinates
-    top_deltas = top_deltas*Config.RPN.BBOX_STD_DEV_GPU
+    top_deltas = top_deltas * Config.RPN.BBOX_STD_DEV_GPU
     refined_rois = utils.apply_box_deltas(
         rois, top_deltas.unsqueeze(0)).squeeze(0)
 
@@ -39,13 +37,15 @@ def _to_input_domain(rois, probs, deltas):
 
 def _apply_nms(class_ids, class_probs, refined_rois, keep):
     pre_nms_class_ids = class_ids[keep]
-    pre_nms_scores = class_probs[keep]
+    pre_nms_probs = class_probs[keep]
     pre_nms_rois = refined_rois[keep]
-    for i, class_id in enumerate(pre_nms_class_ids.unique()):
+    for class_id in pre_nms_class_ids.unique():
         # Pick detections of this class
         class_idxs = (pre_nms_class_ids == class_id).nonzero().squeeze(1)
+        if class_idxs.nelement() == 0:
+            continue
         class_rois = pre_nms_rois[class_idxs]
-        class_probs = pre_nms_scores[class_idxs]
+        class_probs = pre_nms_probs[class_idxs]
         # Sort
         class_probs, order = class_probs.sort(descending=True)
         class_rois = class_rois[order, :]
@@ -56,16 +56,11 @@ def _apply_nms(class_ids, class_probs, refined_rois, keep):
             Config.DETECTION.NMS_THRESHOLD,
             class_rois.shape[0]).squeeze(0)
 
-        # remove some boxes that were deleted by NMS
-        class_keep = class_keep[class_keep != -1]
-        # Map indices
+        class_keep = class_keep.unique()
+        # Map indices back to keep list
         class_keep = keep[class_idxs[order[class_keep]]]
+        keep = utils.set_intersection(keep.unique(), class_keep.unique())
 
-        if i == 0:
-            nms_keep = class_keep
-        else:
-            nms_keep = (torch.cat((nms_keep, class_keep))).unique()
-    keep = utils.set_intersection(keep, nms_keep)
     return keep
 
 
@@ -101,9 +96,12 @@ def detection_layer(rois, probs, deltas):
     # Apply per-class NMS
     keep = _apply_nms(class_ids, class_probs, refined_rois, keep)
 
+    if keep.nelement() == 0:
+        raise NoBoxToKeep
+
     # Keep top detections
-    roi_count = Config.DETECTION.MAX_INSTANCES
-    top_scores_idxs = class_probs[keep].sort(descending=True)[1][:roi_count]
+    _, top_scores_idxs = class_probs[keep].sort(descending=True)[1]
+    top_scores_idxs = top_scores_idxs[:Config.DETECTION.MAX_INSTANCES]
     keep = keep[top_scores_idxs]
 
     # Arrange output as [N, (y1, x1, y2, x2, class_id, score)]

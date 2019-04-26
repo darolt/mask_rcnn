@@ -9,17 +9,15 @@ Written by Waleed Abdulla
 
 ------------------------------------------------------------
 
-Usage: import the module (see Jupyter notebooks for examples), or run from
-       the command line as such:
-
+Usage: 
     # Train a new model starting from pre-trained COCO weights, example:
-    python samples/nuclei.py train --dataset=/home/jro/wk/kaggle/input/ --model=coco
+    python samples/nuclei.py train --model=coco
 
     # Detect nuclei from dataset, example:
-    python samples/nuclei.py submit --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
+    python samples/nuclei.py submit --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
 
     # Get Kaggle's 2018 Databowl metric from dataset, example:
-    python samples/nuclei.py metric --dataset=/home/jro/wk/kaggle/input/ --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
+    python samples/nuclei.py metric --model=/home/jro/wk/kaggle/old_nuclei/logs/nuclei20180531_1649/mask_rcnn_nuclei_3.pth
 """
 
 import logging
@@ -83,14 +81,15 @@ if __name__ == '__main__':
 
         if args.command == 'train':
             dataset_train = NucleusDatasetHandler(Config.DATASET_PATH,
-                                                  'train')
+                                                  'train', Config.NAME)
             dataset_val = NucleusDatasetHandler(Config.DATASET_PATH,
-                                                'val')
+                                                'val', Config.NAME)
             # analyzer = analyze(dataset_train)
-            load_weights(model, args.model, exclude=EXCLUDE)
+            load_weights(model, args.model, exclude=EXCLUDE, strict=False)
             train(model, dataset_train, dataset_val)
         elif args.command == 'submit':
-            dataset = NucleusDatasetHandler(Config.DATASET_PATH, 'stage1_test')
+            dataset = NucleusDatasetHandler(Config.DATASET_PATH,
+                                            'stage1_test', Config.NAME)
             # analyzer = analyze(dataset)
             load_weights(model, args.model)
             submit(model, dataset, RESULTS_DIR)

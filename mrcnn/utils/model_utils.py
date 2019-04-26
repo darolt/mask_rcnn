@@ -9,20 +9,20 @@ import torch
 from tools.config import Config
 
 
-def load_weights(model, filepath, exclude=False):
+def load_weights(model, filepath, exclude=False, strict=True):
     """Modified version of the correspoding Keras function with
     the addition of multi-GPU support and the ability to exclude
     some layers from loading.
     exlude: list of layer names to excluce
     """
     # Load weights
-    logging.info(f"Loading weights from {filepath}")
     if os.path.exists(filepath):
         state_dict = torch.load(filepath)
         if exclude:
             state_dict = {key: value for key, value in state_dict.items()
                           if key not in exclude}
-        model.load_state_dict(state_dict, strict=False)
+        logging.info(f"Loading weights from {filepath}")
+        model.load_state_dict(state_dict, strict=strict)
     else:
         print('Weight file not found ...')
 

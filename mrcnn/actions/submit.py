@@ -38,7 +38,7 @@ def submit(model, dataset, results_dir, analyzer=None):
     summary = {}
     precisions = torch.empty((len(dataset)), device=Config.DEVICE)
     for image_id in dataset.image_ids:
-        logging.debug(f"Predicting for image {image_id}")
+        logging.info(f"Predicting for image {image_id}")
         # Load image and run detection
         image = dataset.load_image(image_id)
         image_name = dataset.image_info[image_id]['id']

@@ -113,7 +113,7 @@ void compute_nms(
 
     if (!(suppress[nblock] & (1ULL << inblock))) {
       keep[thread_idx][num_to_keep++] = i;
-      last_index = 1;
+      last_index = i;
       unsigned long long *p = &iou_matrix_host[0] +
                               thread_idx*nb_elements_tri*block_size +
                               inblock*nb_elements_tri;

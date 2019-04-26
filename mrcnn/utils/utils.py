@@ -209,7 +209,9 @@ def mold_inputs(images):
         molded_images.append(molded_image)
         images_metas.append(image_metas)
     # Pack into arrays
-    molded_images = np.stack(molded_images)
+    molded_images = (torch.from_numpy(np.stack(molded_images)).float()
+                     .permute(0, 3, 1, 2).to(Config.DEVICE))
+
     return molded_images, image_metas
 
 
@@ -338,7 +340,7 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
             warnings.simplefilter('ignore')
             image = skimage.transform.resize(
                 image, (round(h * scale), round(w * scale)),
-                order=1, mode="constant", preserve_range=True)
+                order=1, mode='constant', preserve_range=True)
 
     # Need padding or cropping?
     h, w = image.shape[:2]
@@ -399,7 +401,7 @@ def resize_mask(mask, scale, padding, crop):
     # Suppress warning from scipy 0.13.0, the output shape of zoom() is
     # calculated with round() instead of int()
     with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
+        warnings.simplefilter('ignore')
         mask = scipy.ndimage.zoom(mask, zoom=[scale, scale, 1], order=0)
     if crop is not None:
         y, x, h, w = crop
