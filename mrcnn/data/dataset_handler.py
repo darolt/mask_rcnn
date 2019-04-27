@@ -146,7 +146,7 @@ class DatasetHandler(metaclass=ABCMeta):
 
     def get_image_id(self, idx):
         """Returns the image_id given the idx."""
-        return self.image_info[idx]['path']
+        return self.image_info[idx]['id']
 
     def load_image(self, image_id):
         """Load the specified image and return a [H,W,3] Numpy array.
