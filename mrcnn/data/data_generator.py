@@ -83,18 +83,9 @@ def load_image_gt(dataset_handler, image_id, use_mini_mask=False,
     # bbox: [num_instances, (y1, x1, y2, x2)]
     bbox = utils.extract_bboxes(mask)
 
-    # Active classes
-    # Different dataset_handlers have different classes, so track the
-    # classes supported in the dataset_handler of this image.
-    active_class_ids = np.zeros([dataset_handler.num_classes], dtype=np.int32)
-    active_class_ids[class_ids] = 1
-
     # Resize masks to smaller size to reduce memory usage
     if use_mini_mask:
         mask = utils.minimize_masks(bbox, mask, Config.MINI_MASK.SHAPE)
-
-    # Image meta data
-    image_metas.active_class_ids = np.unique(class_ids)
 
     return image, image_metas, filtered_class_ids, bbox, mask
 
@@ -311,7 +302,6 @@ class DataGenerator(Dataset):
         gt_class_ids = torch.from_numpy(gt_class_ids)
         gt_boxes = torch.from_numpy(gt_boxes).float()
         gt_masks = torch.from_numpy(gt_masks.astype(int).transpose(2, 0, 1)).float()
-
         return (image, image_metas.to_numpy(), rpn_match, rpn_bbox,
                 gt_class_ids, gt_boxes, gt_masks)
 

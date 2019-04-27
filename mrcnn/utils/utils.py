@@ -314,18 +314,20 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
     window = (0, 0, h, w)
     scale = 1
     padding = [(0, 0), (0, 0), (0, 0)]
-    crop = None
+    crop = (-1, -1, -1, -1)
 
     if mode == 'none':
         return image, ImageMetas(original_shape, window,
-                                 scale, padding, crop)
+                                 scale, padding)
 
     if mode == 'resize':
+        scale = (input_shape[0]/h, input_shape[1]/w)
         image = skimage.transform.resize(
-                    image, input_shape,
-                    order=1, mode='constant', preserve_range=True)
+            image, input_shape, order=1,
+            mode='constant', preserve_range=True,
+            anti_aliasing=True)
         return image, ImageMetas(original_shape, window,
-                                 scale, padding, crop)
+                                 scale, padding)
 
     # Scale?
     if min_dim and mode != 'pad64':
@@ -344,11 +346,10 @@ def resize_image(image, min_dim=None, max_dim=None, min_scale=None,
 
     # Resize image using bilinear interpolation
     if scale != 1:
-        with warnings.catch_warnings():
-            warnings.simplefilter('ignore')
-            image = skimage.transform.resize(
-                image, (round(h * scale), round(w * scale)),
-                order=1, mode='constant', preserve_range=True)
+        image = skimage.transform.resize(
+            image, (round(h * scale), round(w * scale)),
+            order=1, mode='constant', preserve_range=True,
+            anti_aliasing=True)
 
     # Need padding or cropping?
     h, w = image.shape[:2]
@@ -410,8 +411,8 @@ def resize_mask(mask, scale, padding, crop):
     # calculated with round() instead of int()
     with warnings.catch_warnings():
         warnings.simplefilter('ignore')
-        mask = scipy.ndimage.zoom(mask, zoom=[scale, scale, 1], order=0)
-    if crop is not None:
+        mask = scipy.ndimage.zoom(mask, zoom=[scale[0], scale[1], 1], order=0)
+    if crop is not None and crop[0] != -1:
         y, x, h, w = crop
         mask = mask[y:y + h, x:x + w]
     else:
@@ -531,7 +532,10 @@ def to_img_domain(boxes, image_metas):
                           device=Config.DEVICE)
 
     # Translate bounding boxes to image domain
-    boxes = ((boxes - shifts)/image_metas.scale)
+    scale = torch.tensor((image_metas.scale[0], image_metas.scale[1],
+                          image_metas.scale[0], image_metas.scale[1]),
+                         device=Config.DEVICE)
+    boxes = ((boxes - shifts) / scale)
     original_box = (0, 0, image_shape[0], image_shape[1])
     boxes = clip_boxes(boxes, original_box, squeeze=True)
     return boxes

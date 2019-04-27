@@ -13,17 +13,16 @@ class ImageMetas():
     """Stores image metas."""
     def __init__(self, original_shape, window=None, scale=1,
                  padding=((0, 0), (0, 0), (0, 0)),
-                 crop=None, active_class_ids=None, image_id=None):
+                 crop=(-1, -1, -1, -1), image_id=-1):
         self.original_shape = original_shape
         if window is None:
             self.window = (0, 0, original_shape[0], original_shape[1])
         else:
             self.window = window
-        self.scale = scale
+        self.scale = (scale, scale) if isinstance(scale, int) else scale
         self.padding = padding
         self.crop = crop
         self.image_id = image_id
-        self.active_class_ids = active_class_ids
 
     def to_numpy(self):
         """Takes attributes of an image and puts them in one 1D array. Use
@@ -39,13 +38,12 @@ class ImageMetas():
         """
         padding_flat = [element for tupl in self.padding for element in tupl]
         meta = np.array(
-            [self.image_id]                # size=1
-            + list(self.original_shape)    # size=3
-            + list(self.window)            # size=4 (y1, x1, y2, x2) in image coordinates
-            + [self.scale]
-            + list(padding_flat)
-            + list(self.crop)
-            + list(self.active_class_ids),  # size=num_classes
+            [self.image_id]                 # size=1
+            + list(self.original_shape)     # size=3
+            + list(self.window)             # size=4 (y1, x1, y2, x2) in image coordinates
+            + list(self.scale)              # size=2 (vertical, horizontal)
+            + list(padding_flat)            # size=6
+            + list(self.crop),              # size=4
             dtype=np.float32)
         return meta
 
@@ -55,19 +53,17 @@ class ImageMetas():
                 f"window: {self.window}, "
                 f"scale: {self.scale}, "
                 f"padding: {self.padding}', "
-                f"crop: {self.crop}, "
-                f"active_class_ids: {self.active_class_ids}")
+                f"crop: {self.crop}")
 
 
 def build_metas_from_numpy(meta):
     """Parses an image info Numpy array to its components.
     See to_numpy() for more details.
     """
-    metas = ImageMetas(meta[1:4],  # original_shape
-                       meta[4:8],   # window
-                       meta[8],  # scale
-                       meta[9:15].reshape((3, 2)),  # padding
-                       meta[15:19],  # crop
-                       meta[19:],  # active_class_ids
-                       meta[0])  # image_id
+    metas = ImageMetas(meta[1:4],                    # original_shape
+                       meta[4:8],                    # window
+                       meta[8:10],                   # scale
+                       meta[10:16].reshape((3, 2)),  # padding
+                       meta[16:],                     # crop
+                       meta[0])                      # image_id
     return metas
