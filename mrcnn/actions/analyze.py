@@ -50,7 +50,7 @@ class DatasetAnalyzer:
         self.height_stats = stats.describe(heights)
         self.width_stats = stats.describe(widths)
 
-        ratios = heights/widths
+        ratios = widths / heights
         self.ratio_stats = stats.describe(ratios)
 
         mean_pixel = [np.mean(img, axis=(0, 1))
