@@ -23,7 +23,7 @@ def proposal_layer(scores, deltas, proposal_count, nms_threshold, anchors):
     # Box Scores. Use the foreground class confidence. [Batch, num_rois, 1]
     scores = scores[:, :, 1]
 
-    deltas = deltas*Config.RPN.BBOX_STD_DEV_GPU
+    deltas = deltas * Config.RPN.BBOX_STD_DEV_GPU
 
     # Improve performance by trimming to top anchors by score
     # and doing the rest on the smaller subset.
