@@ -161,7 +161,7 @@ def box_refinement(box, gt_box):
     dh = torch.log(gt_height / height)
     dw = torch.log(gt_width / width)
 
-    return torch.stack([dy, dx, dh, dw], dim=1) / Config.BBOX_STD_DEV
+    return torch.stack([dy, dx, dh, dw], dim=1) / Config.RPN.BBOX_STD_DEV_GPU
 
 
 def subtract_mean(images):
