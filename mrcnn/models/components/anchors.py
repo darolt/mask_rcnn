@@ -1,11 +1,11 @@
 
 import numpy as np
-import torch
+import torch as th
 
 
-def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
+def generate_anchors(scale, ratios, shape, feature_stride, anchor_stride):
     """
-    scales: 1D array of anchor sizes in pixels. Example: [32, 64, 128]
+    scale: 1D array of anchor sizes in pixels. Example: [32, 64, 128]
     ratios: 1D array of anchor ratios of width/height. Example: [0.5, 1, 2]
     shape: [height, width] spatial shape of the feature map over which
             to generate anchors.
@@ -13,21 +13,21 @@ def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
     anchor_stride: Stride of anchors on the feature map. For example, if the
         value is 2 then generate anchors for every other feature map pixel.
     """
-    # Get all combinations of scales and ratios
-    scales, ratios = np.meshgrid(np.array(scales), np.array(ratios))
+    # Get all combinations of scale and ratios
+    scales, ratios = np.meshgrid(np.array(scale), np.array(ratios))
     scales = scales.flatten()
-    ratios = ratios.flatten()
+    ratios = np.sqrt(ratios.flatten())
 
     # Enumerate heights and widths from scales and ratios
-    heights = scales / np.sqrt(ratios)
-    widths = scales * np.sqrt(ratios)
+    heights = scales / ratios
+    widths = scales * ratios
 
     # Enumerate shifts in feature space
     shifts_y = np.arange(0, shape[0], anchor_stride) * feature_stride
     shifts_x = np.arange(0, shape[1], anchor_stride) * feature_stride
     shifts_x, shifts_y = np.meshgrid(shifts_x, shifts_y)
 
-    # Enumerate combinations of shifts, widths, and heights
+    # Meshgrid of shifts, widths, and heights
     box_widths, box_centers_x = np.meshgrid(widths, shifts_x)
     box_heights, box_centers_y = np.meshgrid(heights, shifts_y)
 
@@ -43,7 +43,7 @@ def generate_anchors(scales, ratios, shape, feature_stride, anchor_stride):
 
 
 def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
-                             anchor_stride, batch_size=None):
+                             anchor_stride, batch_size):
     """Generate anchors at different levels of a feature pyramid. Each scale
     is associated with a level of the pyramid, but each ratio is used in
     all levels of the pyramid.
@@ -56,11 +56,14 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
     # Anchors
     # [anchor_count, (y1, x1, y2, x2)]
     anchors = []
-    for i in range(len(scales)):
-        anchors.append(generate_anchors(scales[i], ratios, feature_shapes[i],
+    for i, scale in enumerate(scales):
+        anchors.append(generate_anchors(scale, ratios, feature_shapes[i],
                                         feature_strides[i], anchor_stride))
     anchors = np.concatenate(anchors, axis=0)
-    if batch_size is not None:
-        new_anchors_shape = (batch_size,) + anchors.shape
-        anchors = np.broadcast_to(anchors, new_anchors_shape)
-    return torch.from_numpy(anchors).float()
+    new_anchors_shape = (batch_size,) + anchors.shape
+    anchors = np.broadcast_to(anchors, new_anchors_shape)
+
+    # if (anchors < 0).any():
+    #     raise Exception('Anchors cannot be negative.')
+
+    return th.from_numpy(anchors).float()

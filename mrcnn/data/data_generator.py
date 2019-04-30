@@ -4,7 +4,6 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from mrcnn.models.components.anchors import generate_pyramid_anchors
 from mrcnn.utils import utils
 from tools.config import Config
 from tools.time_profiling import profilable
@@ -171,9 +170,9 @@ def build_rpn_targets(anchors, gt_class_ids, gt_boxes):
     ids = np.where(rpn_match == 1)[0]
     ix = 0  # index into rpn_bbox
     # TODO: use box_refinment() rather than duplicating the code here
-    for i, a in zip(ids, anchors[ids]):
+    for idx, anchor in zip(ids, anchors[ids]):
         # Closest gt box (it might have IoU < 0.7)
-        gt = gt_boxes[anchor_iou_argmax[i]]
+        gt = gt_boxes[anchor_iou_argmax[idx]]
 
         # Convert coordinates to center plus width/height.
         # GT Box
@@ -182,10 +181,10 @@ def build_rpn_targets(anchors, gt_class_ids, gt_boxes):
         gt_center_y = gt[0] + 0.5 * gt_h
         gt_center_x = gt[1] + 0.5 * gt_w
         # Anchor
-        a_h = a[2] - a[0]
-        a_w = a[3] - a[1]
-        a_center_y = a[0] + 0.5 * a_h
-        a_center_x = a[1] + 0.5 * a_w
+        a_h = anchor[2] - anchor[0]
+        a_w = anchor[3] - anchor[1]
+        a_center_y = anchor[0] + 0.5 * a_h
+        a_center_x = anchor[1] + 0.5 * a_w
 
         # Compute the bbox refinement that the RPN should predict.
         rpn_bbox[ix] = [
@@ -202,7 +201,7 @@ def build_rpn_targets(anchors, gt_class_ids, gt_boxes):
 
 
 class DataGenerator(Dataset):
-    def __init__(self, dataset_handler, augmentation=None):
+    def __init__(self, dataset_handler, augmentation=None, anchors=None):
         """A generator that returns images and corresponding target class ids,
             bounding box deltas, and masks.
 
@@ -243,12 +242,8 @@ class DataGenerator(Dataset):
 
         # Anchors
         # [anchor_count, (y1, x1, y2, x2)]
-        self.anchors = generate_pyramid_anchors(
-            Config.RPN.ANCHOR.SCALES,
-            Config.RPN.ANCHOR.RATIOS,
-            Config.BACKBONE.SHAPES,
-            Config.BACKBONE.STRIDES,
-            Config.RPN.ANCHOR.STRIDE)
+        self.anchors = anchors.cpu()
+
 
     @profilable
     def __getitem__(self, image_index):

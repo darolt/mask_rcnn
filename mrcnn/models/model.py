@@ -10,7 +10,6 @@ Written by Waleed Abdulla
 import logging
 import re
 
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -113,17 +112,17 @@ class MaskRCNN(nn.Module):
 
     def initialize_weights(self):
         """Initialize model weights."""
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.xavier_uniform_(m.weight)
-                if m.bias is not None:
-                    m.bias.detach().zero_()
-            elif isinstance(m, nn.BatchNorm2d):
-                m.weight.detach().fill_(1)
-                m.bias.detach().zero_()
-            elif isinstance(m, nn.Linear):
-                m.weight.detach().normal_(0, 0.01)
-                m.bias.detach().zero_()
+        for module in self.modules():
+            if isinstance(module, nn.Conv2d):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    module.bias.detach().zero_()
+            elif isinstance(module, nn.BatchNorm2d):
+                module.weight.detach().fill_(1)
+                module.bias.detach().zero_()
+            elif isinstance(module, nn.Linear):
+                module.weight.detach().normal_(0, 0.01)
+                module.bias.detach().zero_()
 
     def set_trainable(self, layer_regex):
         """Sets model layers as trainable if their names match
@@ -185,8 +184,8 @@ class MaskRCNN(nn.Module):
 
         # Loop through pyramid layers
         layer_outputs = []  # list of lists
-        for p in rpn_feature_maps:
-            layer_outputs.append(self.rpn(p))
+        for rpn_feature_map in rpn_feature_maps:
+            layer_outputs.append(self.rpn(rpn_feature_map))
 
         # Concatenate layer outputs
         # Convert from list of lists of level outputs to list of lists
@@ -283,13 +282,15 @@ class MaskRCNN(nn.Module):
             return rpn_out, mrcnn_targets, mrcnn_outs
 
     def _get_generators(self, train_dataset, val_dataset, augmentation):
-        train_set = DataGenerator(train_dataset, augmentation=augmentation)
+        train_set = DataGenerator(train_dataset, augmentation=augmentation,
+                                  anchors=self.anchors[0])
         train_generator = torch.utils.data.DataLoader(
             train_set, shuffle=True, batch_size=Config.TRAINING.BATCH_SIZE,
-            num_workers=4)
-        val_set = DataGenerator(val_dataset, augmentation=augmentation)
+            num_workers=1)
+        val_set = DataGenerator(val_dataset, augmentation=augmentation,
+                                anchors=self.anchors[0])
         val_generator = torch.utils.data.DataLoader(
-            val_set, batch_size=1, shuffle=True, num_workers=4)
+            val_set, batch_size=1, shuffle=True, num_workers=1)
         return train_generator, val_generator
 
     def fit(self, train_dataset, val_dataset, learning_rate, epochs,
