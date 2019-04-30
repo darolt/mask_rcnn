@@ -208,7 +208,7 @@ def compute_mrcnn_losses(mrcnn_targets, mrcnn_outs):
         mrcnn_mask_loss += compute_mrcnn_mask_loss(
             mrcnn_target.masks, mrcnn_target.class_ids, mrcnn_out.masks)
 
-    if len(mrcnn_outs) != 0:
+    if mrcnn_outs:
         mrcnn_class_loss /= len(mrcnn_outs)
         mrcnn_bbox_loss /= len(mrcnn_outs)
         mrcnn_mask_loss /= len(mrcnn_outs)
