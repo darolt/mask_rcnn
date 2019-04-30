@@ -60,9 +60,6 @@ def init_config(config_fns, cmd_args=None):
         np.reshape(Config.RPN.BBOX_STD_DEV, [1, 4])
         ).float().to(Config.DEVICE)
 
-    Config.BBOX_STD_DEV = torch.from_numpy(
-        np.array(Config.BBOX_STD_DEV)).float().to(Config.DEVICE)
-
     # this configurations are for speeding up the training
     height, width = Config.IMAGE.SHAPE[:2]
     Config.RPN.CLIP_WINDOW = np.array([0, 0, height, width]).astype(np.float32)
