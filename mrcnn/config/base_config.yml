@@ -130,8 +130,6 @@ HEADS:
         POOL_SIZE: 14
         SHAPE: [28, 28]
 
-BBOX_STD_DEV: [0.1, 0.1, 0.2, 0.2]
-
 DETECTION:
     # Max number of final detections
     MAX_INSTANCES: 100
