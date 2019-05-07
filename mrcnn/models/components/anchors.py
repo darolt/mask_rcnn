@@ -39,6 +39,7 @@ def generate_anchors(scale, ratios, shape, feature_stride, anchor_stride):
     # Convert to corner coordinates (y1, x1, y2, x2)
     boxes = np.concatenate([box_centers - 0.5 * box_sizes,
                             box_centers + 0.5 * box_sizes], axis=1)
+    print(boxes.shape)
     return boxes
 
 
@@ -53,8 +54,6 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
         with the same order of the given scales. So, anchors of scale[0] come
         first, then anchors of scale[1], and so on.
     """
-    # Anchors
-    # [anchor_count, (y1, x1, y2, x2)]
     anchors = []
     for i, scale in enumerate(scales):
         anchors.append(generate_anchors(scale, ratios, feature_shapes[i],
@@ -62,8 +61,5 @@ def generate_pyramid_anchors(scales, ratios, feature_shapes, feature_strides,
     anchors = np.concatenate(anchors, axis=0)
     new_anchors_shape = (batch_size,) + anchors.shape
     anchors = np.broadcast_to(anchors, new_anchors_shape)
-
-    # if (anchors < 0).any():
-    #     raise Exception('Anchors cannot be negative.')
 
     return th.from_numpy(anchors).float()

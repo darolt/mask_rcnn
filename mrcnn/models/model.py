@@ -217,10 +217,6 @@ class MaskRCNN(nn.Module):
         # Create masks for detections
         mrcnn_mask = self.mask(mrcnn_feature_maps, detection_boxes)
 
-        # Add back batch dimension
-        detections = detections
-        mrcnn_mask = mrcnn_mask
-
         return detections, mrcnn_mask
 
     @profilable
@@ -286,11 +282,11 @@ class MaskRCNN(nn.Module):
                                   anchors=self.anchors[0])
         train_generator = torch.utils.data.DataLoader(
             train_set, shuffle=True, batch_size=Config.TRAINING.BATCH_SIZE,
-            num_workers=1)
+            num_workers=4)
         val_set = DataGenerator(val_dataset, augmentation=augmentation,
                                 anchors=self.anchors[0])
         val_generator = torch.utils.data.DataLoader(
-            val_set, batch_size=1, shuffle=True, num_workers=1)
+            val_set, batch_size=1, shuffle=True, num_workers=4)
         return train_generator, val_generator
 
     def fit(self, train_dataset, val_dataset, learning_rate, epochs,

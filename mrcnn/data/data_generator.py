@@ -150,25 +150,25 @@ def build_rpn_targets(anchors, gt_class_ids, gt_boxes):
 
     # Subsample to balance positive and negative anchors
     # Don't let positives be more than half the anchors
-    ids = np.where(rpn_match == 1)[0]
-    extra = len(ids) - (Config.RPN.ANCHOR.NB_PER_IMAGE // 2)
+    pos_ids = np.where(rpn_match == 1)[0]
+    extra = len(pos_ids) - (Config.RPN.ANCHOR.NB_PER_IMAGE // 2)
     if extra > 0:
         # Reset the extra ones to neutral
-        ids = np.random.choice(ids, extra, replace=False)
-        rpn_match[ids] = 0
+        pos_ids = np.random.choice(pos_ids, extra, replace=False)
+        rpn_match[pos_ids] = 0
     # Same for negative proposals
-    ids = np.where(rpn_match == -1)[0]
-    extra = len(ids) - (Config.RPN.ANCHOR.NB_PER_IMAGE -
+    neg_ids = np.where(rpn_match == -1)[0]
+    extra = len(neg_ids) - (Config.RPN.ANCHOR.NB_PER_IMAGE -
                         np.sum(rpn_match == 1))
     if extra > 0:
         # Rest the extra ones to neutral
-        ids = np.random.choice(ids, extra, replace=False)
-        rpn_match[ids] = 0
+        neg_ids = np.random.choice(neg_ids, extra, replace=False)
+        rpn_match[neg_ids] = 0
 
     # For positive anchors, compute shift and scale needed to transform them
     # to match the corresponding GT boxes.
     ids = np.where(rpn_match == 1)[0]
-    ix = 0  # index into rpn_bbox
+    ix = 0
     # TODO: use box_refinment() rather than duplicating the code here
     for idx, anchor in zip(ids, anchors[ids]):
         # Closest gt box (it might have IoU < 0.7)
@@ -193,10 +193,10 @@ def build_rpn_targets(anchors, gt_class_ids, gt_boxes):
             np.log(gt_h / a_h),
             np.log(gt_w / a_w),
         ]
-        # Normalize
-        rpn_bbox[ix] /= Config.RPN.BBOX_STD_DEV
         ix += 1
 
+    # Normalize
+    rpn_bbox[ix] /= Config.RPN.BBOX_STD_DEV
     return rpn_match, rpn_bbox
 
 
